@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>729flux Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
+    .sidebar { width: 260px; min-height: 100vh; background: #ee4d2d; color: white; padding: 20px; position: fixed; left: 0; top: 0; bottom: 0; overflow-y: auto; z-index: 100; }
+    .sidebar-logo { font-size: 22px; font-weight: bold; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.3); }
+    .sidebar-logo span { font-size: 12px; display: block; opacity: 0.8; font-weight: normal; }
+    .channel-select { width: 100%; padding: 8px 10px; border-radius: 6px; border: none; background: rgba(255,255,255,0.15); color: white; font-size: 14px; margin-bottom: 15px; cursor: pointer; }
+    .channel-select option { color: #333; background: white; }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu li { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-bottom: 4px; transition: background 0.2s; }
+    .sidebar-menu li:hover, .sidebar-menu li.active { background: rgba(255,255,255,0.2); }
+    .sidebar-section { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 8px; }
+    .btn-settings { width: 100%; padding: 10px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 15px; }
+    .main { margin-left: 260px; padding: 25px; flex: 1; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+    .topbar h1 { font-size: 22px; color: #333; }
+    .btn-refresh { padding: 8px 16px; background: #ee4d2d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
+    .stat-card { background: white; border-radius: 10px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); border-left: 4px solid #ee4d2d; }
+    .stat-card .label { font-size: 12px; color: #888; margin-bottom: 6px; }
+    .stat-card .value { font-size: 26px; font-weight: bold; color: #333; }
+    .stat-card .sub { font-size: 12px; color: #aaa; margin-top: 4px; }
+    .stat-card.blue { border-left-color: #1890ff; }
+    .stat-card.green { border-left-color: #52c41a; }
+    .stat-card.purple { border-left-color: #722ed1; }
+    .table-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+    .table-card h2 { font-size: 16px; color: #333; margin-bottom: 15px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #fafafa; padding: 10px 12px; text-align: left; font-size: 12px; color: #888; border-bottom: 2px solid #f0f0f0; }
+    td { padding: 10px 12px; font-size: 13px; color: #333; border-bottom: 1px solid #f5f5f5; }
+    tr:hover td { background: #fff7f5; }
+    .badge { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+    .badge-success { background: #f6ffed; color: #52c41a; }
+    .badge-pending { background: #fffbe6; color: #faad14; }
+    .badge-cancel { background: #fff1f0; color: #ff4d4f; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: white; border-radius: 12px; padding: 25px; width: 480px; max-width: 95vw; max-height: 80vh; overflow-y: auto; }
+    .modal h2 { font-size: 18px; color: #333; margin-bottom: 20px; }
+    .channel-item { border: 1px solid #f0f0f0; border-radius: 8px; padding: 12px 15px; margin-bottom: 10px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+    .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+    .btn-primary { padding: 9px 20px; background: #ee4d2d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 8px; }
+    .btn-secondary { padding: 9px 20px; background: #f5f5f5; color: #333; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .btn-add { width: 100%; padding: 10px; border: 2px dashed #ddd; border-radius: 8px; background: none; cursor: pointer; color: #aaa; font-size: 13px; margin-top: 5px; }
+    .status-bar { background: #fff7f5; border: 1px solid #ffd8cc; border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; font-size: 13px; color: #ee4d2d; }
+    .loading { text-align: center; padding: 40px; color: #aaa; font-size: 14px; }
+    @media(max-width:768px){.sidebar{width:100%;min-height:auto;position:relative;}.main{margin-left:0;}body{flex-direction:column;}}
+  </style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-logo">&#128717; 729flux<span>Sales Dashboard</span></div>
+  <div class="sidebar-section">Channel</div>
+  <select class="channel-select" id="channelSelect" onchange="switchChannel(this.value)">
+    <option value="all">All Channels</option>
+  </select>
+  <ul class="sidebar-menu">
+    <li class="active" onclick="showSection('overview',event)">Overview</li>
+    <li onclick="showSection('orders',event)">Orders</li>
+    <li onclick="showSection('products',event)">Products</li>
+  </ul>
+  <div class="sidebar-section">Tools</div>
+  <ul class="sidebar-menu">
+    <li onclick="showSection('summary',event)">Revenue Summary</li>
+  </ul>
+  <button class="btn-settings" onclick="openSettings()">&#9881; Settings</button>
+</div>
+<div class="main">
+  <div class="topbar">
+    <h1 id="pageTitle">Overview</h1>
+    <button class="btn-refresh" onclick="loadData()">&#128260; Refresh</button>
+  </div>
+  <div id="statusBar" class="status-bar" style="display:none"></div>
+  <div id="contentArea"><div class="loading">Loading...</div></div>
+</div>
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h2>&#9881; Settings - Channels</h2>
+    <div id="channelList"></div>
+    <button class="btn-add" onclick="addChannelForm()">+ Add Channel</button>
+    <div id="addForm" style="display:none;margin-top:15px;border-top:1px solid #f0f0f0;padding-top:15px;">
+      <div class="form-group"><label>Channel Name</label><input type="text" id="newChName" placeholder="e.g. Shopee Main"></div>
+      <div class="form-group"><label>Sheet ID</label><input type="text" id="newChId" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"></div>
+      <div style="margin-top:10px;">
+        <button class="btn-primary" onclick="saveNewChannel()">Save & Load</button>
+        <button class="btn-secondary" onclick="cancelAdd()">Cancel</button>
+      </div>
+    </div>
+    <div style="margin-top:20px;text-align:right"><button class="btn-secondary" onclick="closeSettings()">Close</button></div>
+  </div>
+</div>
+<script>
+var channels=JSON.parse(localStorage.getItem('729flux_channels')||'[]');
+var currentChannel='all';
+var allData=[];
+function renderChannelList(){
+  var sel=document.getElementById('channelSelect');
+  sel.innerHTML='<option value="all">All Channels</option>';
+  channels.forEach(function(ch,i){var o=document.createElement('option');o.value=i;o.textContent=ch.name;sel.appendChild(o);});
+  var list=document.getElementById('channelList');
+  if(!channels.length){list.innerHTML='<p style="color:#aaa;text-align:center;padding:20px;font-size:13px">No channels yet</p>';return;}
+  list.innerHTML=channels.map(function(ch,i){return '<div class="channel-item"><div style="display:flex;justify-content:space-between;align-items:center"><div><b>'+ch.name+'</b><div style="font-size:11px;color:#aaa">'+ch.sheetId.substring(0,25)+'...</div></div><button onclick="removeChannel('+i+')" style="background:none;border:none;color:#ff4d4f;cursor:pointer">X</button></div></div>';}).join('');
+}
+function addChannelForm(){document.getElementById('addForm').style.display='block';}
+function cancelAdd(){document.getElementById('addForm').style.display='none';document.getElementById('newChName').value='';document.getElementById('newChId').value='';}
+function saveNewChannel(){
+  var name=document.getElementById('newChName').value.trim();
+  var sheetId=document.getElementById('newChId').value.trim();
+  if(!name||!sheetId){alert('Please fill all fields');return;}
+  channels.push({name:name,sheetId:sheetId});
+  localStorage.setItem('729flux_channels',JSON.stringify(channels));
+  cancelAdd();renderChannelList();closeSettings();loadData();
+}
+function removeChannel(i){if(confirm('Remove?')){channels.splice(i,1);localStorage.setItem('729flux_channels',JSON.stringify(channels));renderChannelList();}}
+function openSettings(){renderChannelList();document.getElementById('settingsModal').classList.add('show');}
+function closeSettings(){document.getElementById('settingsModal').classList.remove('show');}
+function switchChannel(v){currentChannel=v;loadData();}
+function showSection(sec,e){
+  if(e){document.querySelectorAll('.sidebar-menu li').forEach(function(l){l.classList.remove('active');});e.target.classList.add('active');}
+  document.getElementById('pageTitle').textContent={overview:'Overview',orders:'Orders',products:'Products',summary:'Revenue Summary'}[sec]||sec;
+  renderSection(sec);
+}
+function loadData(){
+  if(!channels.length){document.getElementById('contentArea').innerHTML='<div style="text-align:center;padding:60px"><div style="font-size:48px">&#128203;</div><h3 style="margin:15px 0 8px">No channels</h3><p style="color:#aaa;font-size:14px">Click Settings to add a Google Sheet</p><button class="btn-primary" onclick="openSettings()" style="margin-top:20px">Settings</button></div>';return;}
+  var sb=document.getElementById('statusBar');sb.style.cssText='background:#fff7f5;border:1px solid #ffd8cc;border-radius:6px;padding:10px 14px;margin-bottom:20px;font-size:13px;color:#ee4d2d;display:block';sb.textContent='Loading...';
+  document.getElementById('contentArea').innerHTML='<div class="loading">Loading data...</div>';
+  var fetchChannels=currentChannel==='all'?channels:[channels[parseInt(currentChannel)]];
+  var combined=[];var pending=fetchChannels.length;
+  fetchChannels.forEach(function(ch){
+    fetch('/api/data?sheetId='+ch.sheetId).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(j){
+      if(j.data)combined=combined.concat(j.data.map(function(r){r._channel=ch.name;return r;}));
+      if(--pending===0){allData=combined;sb.textContent='Loaded '+allData.length+' records | '+new Date().toLocaleTimeString();renderSection('overview');}
+    }).catch(function(err){sb.style.color='#ff4d4f';sb.textContent='Error: '+err.message;document.getElementById('contentArea').innerHTML='<div class="loading">Could not load data. Check API Key and Sheet ID.</div>';});
+  });
+}
+function renderSection(sec){
+  var area=document.getElementById('contentArea');
+  if(sec==='overview'){
+    var total=allData.length;
+    var rev=allData.reduce(function(s,r){return s+(parseFloat(r['ยอดขาย']||r['ราคา']||r['price']||0));},0);
+    var done=allData.filter(function(r){var st=(r['สถานะ']||r['status']||'').toLowerCase();return st.includes('complete')||st.includes('success')||st.includes('สำเร็จ');}).length;
+    area.innerHTML='<div class="stats-grid"><div class="stat-card"><div class="label">Total Orders</div><div class="value">'+total.toLocaleString()+'</div></div><div class="stat-card green"><div class="label">Total Revenue</div><div class="value">'+rev.toLocaleString(undefined,{maximumFractionDigits:0})+'</div></div><div class="stat-card blue"><div class="label">Completed</div><div class="value">'+done+'</div></div><div class="stat-card purple"><div class="label">Channels</div><div class="value">'+channels.length+'</div></div></div>'+renderTable(allData.slice(0,50),'Latest 50 Orders');
+  }else if(sec==='orders'){area.innerHTML=renderTable(allData,'All Orders');}
+  else if(sec==='products'){
+    var pc={};allData.forEach(function(r){var p=r['ชื่อสินค้า']||r['สินค้า']||r['product']||'Unknown';pc[p]=(pc[p]||0)+1;});
+    area.innerHTML='<div class="table-card"><h2>Products</h2><table><tr><th>#</th><th>Product</th><th>Orders</th></tr>'+Object.entries(pc).sort(function(a,b){return b[1]-a[1];}).map(function(p,i){return '<tr><td>'+(i+1)+'</td><td>'+p[0]+'</td><td>'+p[1]+'</td></tr>';}).join('')+'</table></div>';
+  }else if(sec==='summary'){
+    var by={};allData.forEach(function(r){var ch=r._channel||'All';if(!by[ch])by[ch]={orders:0,revenue:0};by[ch].orders++;by[ch].revenue+=parseFloat(r['ยอดขาย']||r['ราคา']||r['price']||0);});
+    area.innerHTML='<div class="table-card"><h2>Revenue by Channel</h2><table><tr><th>Channel</th><th>Orders</th><th>Revenue</th></tr>'+Object.entries(by).map(function(e){return '<tr><td>'+e[0]+'</td><td>'+e[1].orders+'</td><td>'+e[1].revenue.toLocaleString(undefined,{maximumFractionDigits:0})+'</td></tr>';}).join('')+'</table></div>';
+  }
+}
+function renderTable(data,title){
+  if(!data||!data.length)return '<div class="loading">No data</div>';
+  var keys=Object.keys(data[0]).filter(function(k){return k!=='_channel';});
+  return '<div class="table-card"><h2>'+title+'</h2><div style="overflow-x:auto"><table><tr>'+keys.map(function(k){return '<th>'+k+'</th>';}).join('')+'</tr>'+data.map(function(row){return '<tr>'+keys.map(function(k){var v=row[k]||'';var b=v;if(typeof v==='string'){if(v.includes('สำเร็จ')||v.toLowerCase().includes('complete'))b='<span class="badge badge-success">'+v+'</span>';else if(v.includes('รอ')||v.toLowerCase().includes('pending'))b='<span class="badge badge-pending">'+v+'</span>';else if(v.includes('ยกเลิก')||v.toLowerCase().includes('cancel'))b='<span class="badge badge-cancel">'+v+'</span>';}return '<td>'+b+'</td>';}).join('')+'</tr>';}).join('')+'</table></div></div>';
+}
+renderChannelList();loadData();
+</script>
+</body>
+</html>
