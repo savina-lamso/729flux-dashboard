@@ -1,168 +1,1800 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>729flux Dashboard</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
-    .sidebar { width: 260px; min-height: 100vh; background: #ee4d2d; color: white; padding: 20px; position: fixed; left: 0; top: 0; bottom: 0; overflow-y: auto; z-index: 100; }
-    .sidebar-logo { font-size: 22px; font-weight: bold; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.3); }
-    .sidebar-logo span { font-size: 12px; display: block; opacity: 0.8; font-weight: normal; }
-    .channel-select { width: 100%; padding: 8px 10px; border-radius: 6px; border: none; background: rgba(255,255,255,0.15); color: white; font-size: 14px; margin-bottom: 15px; cursor: pointer; }
-    .channel-select option { color: #333; background: white; }
-    .sidebar-menu { list-style: none; }
-    .sidebar-menu li { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-bottom: 4px; transition: background 0.2s; }
-    .sidebar-menu li:hover, .sidebar-menu li.active { background: rgba(255,255,255,0.2); }
-    .sidebar-section { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 8px; }
-    .btn-settings { width: 100%; padding: 10px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 15px; }
-    .main { margin-left: 260px; padding: 25px; flex: 1; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
-    .topbar h1 { font-size: 22px; color: #333; }
-    .btn-refresh { padding: 8px 16px; background: #ee4d2d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
-    .stat-card { background: white; border-radius: 10px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); border-left: 4px solid #ee4d2d; }
-    .stat-card .label { font-size: 12px; color: #888; margin-bottom: 6px; }
-    .stat-card .value { font-size: 26px; font-weight: bold; color: #333; }
-    .stat-card .sub { font-size: 12px; color: #aaa; margin-top: 4px; }
-    .stat-card.blue { border-left-color: #1890ff; }
-    .stat-card.green { border-left-color: #52c41a; }
-    .stat-card.purple { border-left-color: #722ed1; }
-    .table-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
-    .table-card h2 { font-size: 16px; color: #333; margin-bottom: 15px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { background: #fafafa; padding: 10px 12px; text-align: left; font-size: 12px; color: #888; border-bottom: 2px solid #f0f0f0; }
-    td { padding: 10px 12px; font-size: 13px; color: #333; border-bottom: 1px solid #f5f5f5; }
-    tr:hover td { background: #fff7f5; }
-    .badge { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
-    .badge-success { background: #f6ffed; color: #52c41a; }
-    .badge-pending { background: #fffbe6; color: #faad14; }
-    .badge-cancel { background: #fff1f0; color: #ff4d4f; }
-    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
-    .modal-overlay.show { display: flex; }
-    .modal { background: white; border-radius: 12px; padding: 25px; width: 480px; max-width: 95vw; max-height: 80vh; overflow-y: auto; }
-    .modal h2 { font-size: 18px; color: #333; margin-bottom: 20px; }
-    .channel-item { border: 1px solid #f0f0f0; border-radius: 8px; padding: 12px 15px; margin-bottom: 10px; }
-    .form-group { margin-bottom: 12px; }
-    .form-group label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
-    .form-group input { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
-    .btn-primary { padding: 9px 20px; background: #ee4d2d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 8px; }
-    .btn-secondary { padding: 9px 20px; background: #f5f5f5; color: #333; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 13px; }
-    .btn-add { width: 100%; padding: 10px; border: 2px dashed #ddd; border-radius: 8px; background: none; cursor: pointer; color: #aaa; font-size: 13px; margin-top: 5px; }
-    .status-bar { background: #fff7f5; border: 1px solid #ffd8cc; border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; font-size: 13px; color: #ee4d2d; }
-    .loading { text-align: center; padding: 40px; color: #aaa; font-size: 14px; }
-    @media(max-width:768px){.sidebar{width:100%;min-height:auto;position:relative;}.main{margin-left:0;}body{flex-direction:column;}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>729flux Live Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --orange: #EE4D2D;
+  --orange-light: #FF7337;
+  --orange-pale: #FFF3F0;
+  --orange-mid: #FFE0D9;
+  --dark: #1A0A00;
+  --dark2: #2D1200;
+  --text: #1A0A00;
+  --text2: #6B3A2A;
+  --text3: #A06050;
+  --bg: #FFF8F6;
+  --white: #FFFFFF;
+  --border: rgba(238,77,45,0.15);
+  --green: #0F9B6A;
+  --green-bg: #E6F7F1;
+  --red: #D42020;
+  --red-bg: #FDECEC;
+  --gold: #C97D00;
+  --gold-bg: #FFF6E0;
+  --gray: #7A6060;
+  --gray-bg: #F5EFED;
+  --shadow: 0 2px 16px rgba(238,77,45,0.08);
+  --shadow-hover: 0 8px 32px rgba(238,77,45,0.18);
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Sarabun', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
+}
+
+/* ---- TOP BAR ---- */
+.topbar {
+  background: var(--orange);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(238,77,45,0.3);
+}
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Prompt', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+.shopee-icon {
+  width: 28px; height: 28px;
+  background: #fff;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.85);
+}
+.topbar-badge {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #fff;
+}
+
+/* ---- LAYOUT ---- */
+.layout { display: flex; min-height: calc(100vh - 56px); }
+
+/* ---- SIDEBAR ---- */
+.sidebar {
+  width: 220px;
+  background: var(--white);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+.sidebar-section {
+  padding: 0 14px;
+  margin-bottom: 8px;
+}
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 6px 4px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text2);
+  font-weight: 400;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.nav-item:hover { background: var(--orange-pale); color: var(--orange); }
+.nav-item.active {
+  background: var(--orange-pale);
+  color: var(--orange);
+  font-weight: 600;
+}
+.nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+/* ---- MAIN CONTENT ---- */
+.main {
+  flex: 1;
+  padding: 24px;
+  overflow-x: hidden;
+}
+
+/* ---- PAGE HEADER ---- */
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-title { font-family: 'Prompt', sans-serif; font-weight: 700; font-size: 22px; color: var(--dark); }
+.page-sub { font-size: 13px; color: var(--text3); margin-top: 2px; }
+
+.controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.select-styled {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 13px;
+  color: var(--text2);
+  background: var(--white);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A06050' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.select-styled:focus { border-color: var(--orange); }
+
+.btn-primary {
+  background: var(--orange);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary:hover { background: var(--orange-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(238,77,45,0.3); }
+
+/* ---- PAGE SECTIONS ---- */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ---- KPI STRIP ---- */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+.kpi-card:hover { box-shadow: var(--shadow-hover); }
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--orange);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.kpi-card.green::before { background: var(--green); }
+.kpi-card.gold::before { background: var(--gold); }
+.kpi-card.gray::before { background: var(--gray); }
+.kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.kpi-value {
+  font-family: 'Prompt', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.1;
+}
+.kpi-change {
+  font-size: 12px;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.up { color: var(--green); }
+.down { color: var(--red); }
+.neutral { color: var(--gray); }
+.kpi-emoji { font-size: 24px; position: absolute; right: 14px; top: 14px; opacity: 0.18; }
+
+/* ---- CHART CARDS ---- */
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.chart-grid.single { grid-template-columns: 1fr; }
+.chart-grid.three { grid-template-columns: 2fr 1fr; }
+.chart-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s;
+}
+.chart-card:hover { box-shadow: var(--shadow-hover); }
+.chart-card.full { grid-column: 1 / -1; }
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-title { font-family: 'Prompt', sans-serif; font-size: 15px; font-weight: 600; color: var(--dark); }
+.card-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.chart-wrap { position: relative; }
+
+/* ---- LEGEND ---- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+/* ---- INSIGHT CARDS ---- */
+.insight-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.insight-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.insight-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.insight-icon.orange { background: var(--orange-pale); }
+.insight-icon.green { background: var(--green-bg); }
+.insight-icon.gold { background: var(--gold-bg); }
+.insight-icon.red { background: var(--red-bg); }
+.insight-text .label { font-size: 12px; color: var(--text3); margin-bottom: 3px; }
+.insight-text .value { font-family: 'Prompt', sans-serif; font-size: 16px; font-weight: 600; color: var(--dark); }
+.insight-text .desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+
+/* ---- TABLE ---- */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text3);
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 2px solid var(--border);
+  background: var(--orange-pale);
+}
+.data-table td {
+  padding: 11px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.data-table tr:hover td { background: var(--orange-pale); }
+.rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  font-size: 11px; font-weight: 700;
+}
+.rank-1 { background: #FFD700; color: #7A5000; }
+.rank-2 { background: #C0C0C0; color: #444; }
+.rank-3 { background: #CD7F32; color: #fff; }
+.rank-n { background: var(--gray-bg); color: var(--gray); }
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tag-orange { background: var(--orange-pale); color: var(--orange); }
+.tag-green { background: var(--green-bg); color: var(--green); }
+.tag-gold { background: var(--gold-bg); color: var(--gold); }
+.tag-red { background: var(--red-bg); color: var(--red); }
+.tag-gray { background: var(--gray-bg); color: var(--gray); }
+
+/* ---- PROGRESS BAR ---- */
+.pbar-wrap { background: var(--orange-pale); border-radius: 4px; height: 6px; margin-top: 4px; }
+.pbar { height: 100%; border-radius: 4px; background: var(--orange); }
+.pbar.green { background: var(--green); }
+
+/* ---- HEATMAP ---- */
+.heatmap-wrap { overflow-x: auto; }
+.heatmap { border-collapse: collapse; font-size: 11px; width: 100%; }
+.heatmap th { padding: 4px 6px; color: var(--text3); font-weight: 600; text-align: center; font-size: 10px; }
+.heatmap td {
+  width: 34px; height: 30px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  margin: 1px;
+  cursor: default;
+  transition: transform 0.1s;
+}
+.heatmap td:hover { transform: scale(1.15); z-index: 2; position: relative; }
+.hm-label { font-weight: 700; color: var(--text2); background: none !important; }
+
+/* ---- MoM COMPARISON ---- */
+.mom-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.mom-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.mom-month { font-size: 12px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+.mom-main { font-family: 'Prompt', sans-serif; font-size: 28px; font-weight: 700; color: var(--dark); }
+.mom-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.mom-change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+.mom-card.current { border: 2px solid var(--orange); }
+.mom-card.current .mom-month { color: var(--orange); }
+
+/* ---- UPLOAD AREA ---- */
+.upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--orange-pale);
+  margin-bottom: 20px;
+}
+.upload-area:hover { border-color: var(--orange); background: var(--orange-mid); }
+.upload-icon { font-size: 40px; margin-bottom: 12px; }
+.upload-title { font-family: 'Prompt', sans-serif; font-size: 16px; font-weight: 600; color: var(--dark); margin-bottom: 6px; }
+.upload-sub { font-size: 13px; color: var(--text3); }
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { padding: 16px; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .mom-grid { grid-template-columns: 1fr; }
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---- ANIMATIONS ---- */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page.active > * { animation: fadeUp 0.3s ease both; }
+.page.active > *:nth-child(1) { animation-delay: 0s; }
+.page.active > *:nth-child(2) { animation-delay: 0.05s; }
+.page.active > *:nth-child(3) { animation-delay: 0.1s; }
+.page.active > *:nth-child(4) { animation-delay: 0.15s; }
+.page.active > *:nth-child(5) { animation-delay: 0.2s; }
+
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text3);
+}
+.empty-state .emoji { font-size: 40px; margin-bottom: 12px; }
+</style>
 </head>
 <body>
-<div class="sidebar">
-  <div class="sidebar-logo">&#128717; 729flux<span>Sales Dashboard</span></div>
-  <div class="sidebar-section">Channel</div>
-  <select class="channel-select" id="channelSelect" onchange="switchChannel(this.value)">
-    <option value="all">All Channels</option>
-  </select>
-  <ul class="sidebar-menu">
-    <li class="active" onclick="showSection('overview',event)">Overview</li>
-    <li onclick="showSection('orders',event)">Orders</li>
-    <li onclick="showSection('products',event)">Products</li>
-  </ul>
-  <div class="sidebar-section">Tools</div>
-  <ul class="sidebar-menu">
-    <li onclick="showSection('summary',event)">Revenue Summary</li>
-  </ul>
-  <button class="btn-settings" onclick="openSettings()">&#9881; Settings</button>
-</div>
-<div class="main">
-  <div class="topbar">
-    <h1 id="pageTitle">Overview</h1>
-    <button class="btn-refresh" onclick="loadData()">&#128260; Refresh</button>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-brand">
+    <div class="shopee-icon">🛍️</div>
+    729flux Live Analytics
   </div>
-  <div id="statusBar" class="status-bar" style="display:none"></div>
-  <div id="contentArea"><div class="loading">Loading...</div></div>
+  <div class="topbar-right">
+    <select id="channelSelect" class="select-styled" onchange="switchChannel()" style="background:rgba(255,255,255,0.95);border:none;font-weight:600;color:var(--orange)"></select>
+    <span class="topbar-badge" id="lastUpdate">กำลังโหลด...</span>
+  </div>
 </div>
-<div class="modal-overlay" id="settingsModal">
-  <div class="modal">
-    <h2>&#9881; Settings - Channels</h2>
-    <div id="channelList"></div>
-    <button class="btn-add" onclick="addChannelForm()">+ Add Channel</button>
-    <div id="addForm" style="display:none;margin-top:15px;border-top:1px solid #f0f0f0;padding-top:15px;">
-      <div class="form-group"><label>Channel Name</label><input type="text" id="newChName" placeholder="e.g. Shopee Main"></div>
-      <div class="form-group"><label>Sheet ID</label><input type="text" id="newChId" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"></div>
-      <div style="margin-top:10px;">
-        <button class="btn-primary" onclick="saveNewChannel()">Save & Load</button>
-        <button class="btn-secondary" onclick="cancelAdd()">Cancel</button>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">ภาพรวม</div>
+      <button class="nav-item active" onclick="setPage('overview')">
+        <span class="nav-icon">📊</span> ยอดขายรายเดือน
+      </button>
+      <button class="nav-item" onclick="setPage('mom')">
+        <span class="nav-icon">📈</span> เปรียบเทียบ MoM
+      </button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">วิเคราะห์</div>
+      <button class="nav-item" onclick="setPage('organic')">
+        <span class="nav-icon">🌱</span> ยอด Organic
+      </button>
+      <button class="nav-item" onclick="setPage('hourly')">
+        <span class="nav-icon">⏰</span> ช่วงเวลาขายดี
+      </button>
+      <button class="nav-item" onclick="setPage('campaign')">
+        <span class="nav-icon">🎯</span> วันแคมเปญ
+      </button>
+      <button class="nav-item" onclick="setPage('hosts')">
+        <span class="nav-icon">👥</span> ผลงานทีมไลฟ์
+      </button>
+      <button class="nav-item" onclick="setPage('ads')">
+        <span class="nav-icon">📣</span> ค่าแอด & ROAS
+      </button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">ตั้งค่า</div>
+      <button class="nav-item" onclick="setPage('import')">
+        <span class="nav-icon">⚙️</span> ตั้งค่า Channels
+      </button>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ====== PAGE: OVERVIEW ====== -->
+    <div id="page-overview" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ยอดขายรายเดือน</div>
+          <div class="page-sub">ช่อง 729flux • Shopee Live</div>
+        </div>
+        <div class="controls">
+          <select class="select-styled" id="monthFilter" onchange="filterMonth()">
+            <option value="all">ทุกเดือน</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- KPI STRIP -->
+      <div class="kpi-strip" id="kpiStrip">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- CHART: ยอดขายรายเดือน -->
+      <div class="chart-grid single" style="margin-bottom:16px">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายสะสมรายเดือน</div>
+              <div class="card-sub">เปรียบเทียบ มี.ค. / เม.ย. / พ.ค.</div>
+            </div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>ยอดขาย (฿)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>คำสั่งซื้อ</span>
+          </div>
+          <div class="chart-wrap" style="height:260px">
+            <canvas id="chartMonthly" role="img" aria-label="ยอดขายรายเดือน มีนาคม เมษายน พฤษภาคม">ยอดขาย มี.ค. ~90K, เม.ย. ~850K, พ.ค. ~850K</canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHART: Daily trend -->
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายรายวัน (trend)</div>
+              <div class="card-sub">เน้นดูวันที่ยอดพุ่งผิดปกติ</div>
+            </div>
+          </div>
+          <div class="chart-wrap" style="height:200px">
+            <canvas id="chartDaily" role="img" aria-label="ยอดขายรายวัน">กราฟเส้น trend ยอดขายรายวัน</canvas>
+          </div>
+        </div>
       </div>
     </div>
-    <div style="margin-top:20px;text-align:right"><button class="btn-secondary" onclick="closeSettings()">Close</button></div>
-  </div>
+
+    <!-- ====== PAGE: MoM ====== -->
+    <div id="page-mom" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">เปรียบเทียบ Month-over-Month</div>
+          <div class="page-sub">วัดการเติบโตเทียบเดือนก่อนหน้า</div>
+        </div>
+      </div>
+
+      <div class="mom-grid">
+        <div class="mom-card">
+          <div class="mom-month">มีนาคม 2569</div>
+          <div class="mom-main">฿90,754</div>
+          <div class="mom-sub">8 sessions • 8 วันไลฟ์</div>
+          <div class="mom-change-badge tag-gray">เดือนแรก</div>
+        </div>
+        <div class="mom-card">
+          <div class="mom-month">เมษายน 2569</div>
+          <div class="mom-main">฿853,699</div>
+          <div class="mom-sub">14 sessions • 23 วันไลฟ์</div>
+          <div class="mom-change-badge tag-green">▲ +840% จากมี.ค.</div>
+        </div>
+        <div class="mom-card current">
+          <div class="mom-month">พฤษภาคม 2569 🔥</div>
+          <div class="mom-main">฿850,454</div>
+          <div class="mom-sub">11 sessions • ~23 วัน</div>
+          <div class="mom-change-badge tag-orange">▲ +0.4% vs เม.ย.</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ยอดขาย MoM</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartMoM" role="img" aria-label="เปรียบเทียบยอดขาย MoM">มี.ค. 90K, เม.ย. 853K, พ.ค. 850K</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">คำสั่งซื้อ MoM</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartMoMOrders" role="img" aria-label="เปรียบเทียบคำสั่งซื้อ MoM">Orders ต่อเดือน</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">🚀</div>
+          <div class="insight-text">
+            <div class="label">การเติบโตสูงสุด</div>
+            <div class="value">+840% มี.ค.→เม.ย.</div>
+            <div class="desc">เดือนแรกที่ไลฟ์ครบจริง ยอดพุ่งจากการ scale ทีมและ campaign</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">✅</div>
+          <div class="insight-text">
+            <div class="label">ความสม่ำเสมอ พ.ค.</div>
+            <div class="value">รักษายอดได้เกือบเท่า</div>
+            <div class="desc">พ.ค. ทำได้ ฿850K เทียบ เม.ย. ฿853K — แสดงว่า momentum คงตัว</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">🎯</div>
+          <div class="insight-text">
+            <div class="label">เป้าหมาย มิ.ย.</div>
+            <div class="value">฿1,000,000+</div>
+            <div class="desc">ต้องการ +17.6% growth ด้วย 6.6 double day เป็นโอกาสทอง</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: HOURLY ====== -->
+    <div id="page-hourly" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ช่วงเวลาขายดี</div>
+          <div class="page-sub">วิเคราะห์ pattern รายชั่วโมง จาก session ทั้งหมด</div>
+        </div>
+      </div>
+
+      <!-- Summary KPIs -->
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)">
+        <div class="kpi-card">
+          <div class="kpi-emoji">🌙</div>
+          <div class="kpi-label">ดึก 00-06</div>
+          <div class="kpi-value">฿358K</div>
+          <div class="kpi-change up">ROAS 49x ดีที่สุด</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-emoji">☀️</div>
+          <div class="kpi-label">เช้า 06-12</div>
+          <div class="kpi-value">฿389K</div>
+          <div class="kpi-change neutral">ROAS 35x</div>
+        </div>
+        <div class="kpi-card gold">
+          <div class="kpi-emoji">🌤️</div>
+          <div class="kpi-label">เที่ยง-บ่าย 12-18</div>
+          <div class="kpi-value">฿499K</div>
+          <div class="kpi-change neutral">ROAS 24x</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-emoji">🔥</div>
+          <div class="kpi-label">เย็น 18-24</div>
+          <div class="kpi-value">฿549K</div>
+          <div class="kpi-change up">PEAK SALES</div>
+        </div>
+      </div>
+
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายเฉลี่ยแยกรายชั่วโมง</div>
+              <div class="card-sub">สีเข้ม = peak / สีอ่อน = ต่ำ</div>
+            </div>
+          </div>
+          <div class="chart-wrap" style="height:240px">
+            <canvas id="chartHourly" role="img" aria-label="ยอดขายรายชั่วโมง 0-23 น.">กราฟยอดขายรายชั่วโมง</canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Heatmap -->
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Heatmap ยอดขาย — วันในสัปดาห์ × ชั่วโมง</div>
+            <div class="card-sub">สีเข้ม = ยอดขายสูง</div>
+          </div>
+        </div>
+        <div class="heatmap-wrap">
+          <table class="heatmap" id="heatmapTable"></table>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">⚡</div>
+          <div class="insight-text">
+            <div class="label">ชั่วโมง peak ที่สุด</div>
+            <div class="value">22:00 – 23:00</div>
+            <div class="desc">ยอดพุ่งแรงสุดทุกวัน — schedule promotion / flash sale ช่วงนี้</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">💡</div>
+          <div class="insight-text">
+            <div class="label">Hidden gem (ROAS สูง)</div>
+            <div class="value">01:00 – 03:00</div>
+            <div class="desc">ค่าแอดถูกมาก ROAS > 100x บางชั่วโมง — ทดสอบ Retargeting ช่วงนี้</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">📅</div>
+          <div class="insight-text">
+            <div class="label">วันขายดีที่สุด</div>
+            <div class="value">อาทิตย์ & เสาร์</div>
+            <div class="desc">Weekend ยอดเฉลี่ยสูงกว่าวันธรรมดา ~30% — เพิ่ม session weekend</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: CAMPAIGN ====== -->
+    <div id="page-campaign" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">วันแคมเปญ & วันพิเศษ</div>
+          <div class="page-sub">Double Day / Payday / Midmonth เทียบวันปกติ</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ยอดขายแยกตามประเภทวัน</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>Double Day</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>Payday</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#C97D00"></span>ปลาย/ต้นเดือน</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#9B9B9B"></span>วันปกติ</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartCampaign" role="img" aria-label="ยอดขายแยกตามประเภทวัน">Double Day สูงสุด, ปกติต่ำสุด</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">สัดส่วนยอดขายแต่ละประเภท</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartCampaignPie" role="img" aria-label="สัดส่วนยอดขายแต่ละประเภทวัน">Pie chart สัดส่วนยอด</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <div><div class="card-title">Timeline วันพิเศษ — ยอดขายต่อ session</div></div>
+        </div>
+        <div class="chart-wrap" style="height:200px">
+          <canvas id="chartCampaignBar" role="img" aria-label="ยอดขายแต่ละวันแคมเปญ">แท่งเปรียบเทียบวันแคมเปญแต่ละวัน</canvas>
+        </div>
+      </div>
+
+      <!-- Campaign Table -->
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:16px">ผลวันแคมเปญทั้งหมด</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr>
+              <th>วัน</th><th>ประเภท</th><th>ยอดขาย</th><th>vs ปกติ</th><th>หมายเหตุ</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>4 เม.ย. (4.4)</td><td><span class="tag tag-orange">Double Day</span></td><td>฿163,660</td><td><span class="tag tag-green">+650%</span></td><td>ยอดสูงสุดขณะนั้น</td></tr>
+              <tr><td>5 พ.ค. (5.5)</td><td><span class="tag tag-orange">Double Day</span></td><td>฿205,907</td><td><span class="tag tag-green">+800%</span></td><td>ยอดสูงสุดในข้อมูลทั้งหมด</td></tr>
+              <tr><td>25 เม.ย. (payday)</td><td><span class="tag tag-gold">Payday</span></td><td>฿46,643</td><td><span class="tag tag-green">+90%</span></td><td>ดีกว่าวันธรรมดา</td></tr>
+              <tr><td>28-30 เม.ย.</td><td><span class="tag tag-gold">สิ้นเดือน</span></td><td>฿51,305</td><td><span class="tag tag-green">+110%</span></td><td>เงินเดือนรัฐออก</td></tr>
+              <tr><td>15 พ.ค. (midmonth)</td><td><span class="tag tag-gray">Midmonth</span></td><td>฿3,010</td><td><span class="tag tag-red">-85%</span></td><td>Session สั้น ไม่ push promo</td></tr>
+              <tr><td>วันปกติ (เฉลี่ย)</td><td><span class="tag tag-gray">ปกติ</span></td><td>฿18,000-25,000</td><td>—</td><td>base line</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: HOSTS ====== -->
+    <div id="page-hosts" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ผลงานทีมไลฟ์</div>
+          <div class="page-sub">ประสิทธิภาพแยกตาม host</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ยอดขายสะสมแต่ละ host</div></div>
+          </div>
+          <div class="chart-wrap" style="height:280px">
+            <canvas id="chartHosts" role="img" aria-label="ยอดขายแยก host">กราฟ bar แนวนอน host ranking</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">สัดส่วนยอดขายของทีม</div></div>
+          </div>
+          <div class="chart-wrap" style="height:280px">
+            <canvas id="chartHostPie" role="img" aria-label="pie สัดส่วนแต่ละ host">Pie chart สัดส่วน host</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:0">
+        <div class="card-title" style="margin-bottom:16px">Leaderboard ทีมไลฟ์</div>
+        <table class="data-table">
+          <thead><tr>
+            <th>อันดับ</th><th>ชื่อ</th><th>ยอดขายสะสม</th><th>ชั่วโมงไลฟ์</th><th>เฉลี่ย/ชม.</th><th>ช่วงทำได้ดี</th>
+          </tr></thead>
+          <tbody id="hostTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: ADS ====== -->
+    <div id="page-ads" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ค่าแอด & ROAS</div>
+          <div class="page-sub">วิเคราะห์ประสิทธิภาพการยิงแอด</div>
+        </div>
+      </div>
+
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)">
+        <div class="kpi-card">
+          <div class="kpi-label">ค่าแอดรวม</div>
+          <div class="kpi-value">฿60.6K</div>
+          <div class="kpi-change neutral">ทุก session</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">ROAS รวม</div>
+          <div class="kpi-value">578x</div>
+          <div class="kpi-change up">ยอดขาย/แอด</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">ROAS ดีที่สุด</div>
+          <div class="kpi-value">1,412x</div>
+          <div class="kpi-change up">10 เม.ย. 17:00</div>
+        </div>
+        <div class="kpi-card gold">
+          <div class="kpi-label">เฉลี่ยต่อ session</div>
+          <div class="kpi-value">฿1,380</div>
+          <div class="kpi-change neutral">ค่าแอด/session</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ค่าแอด vs ยอดขาย รายเดือน</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>ยอดขาย</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#C97D00"></span>ค่าแอด</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartAds" role="img" aria-label="ค่าแอด vs ยอดขาย">เปรียบเทียบค่าแอดกับยอดขาย</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ROAS แยกช่วงเวลา</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartROAS" role="img" aria-label="ROAS แยกช่วงเวลา">ROAS 4 ช่วงเวลา</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">💰</div>
+          <div class="insight-text">
+            <div class="label">กลยุทธ์แนะนำ</div>
+            <div class="value">เพิ่มแอดช่วงดึก</div>
+            <div class="desc">ROAS 49x ดีที่สุด ค่าแอดถูก — ทดลองเพิ่ม budget 20-30% ช่วง 01-04 น.</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">✂️</div>
+          <div class="insight-text">
+            <div class="label">ลด</div>
+            <div class="value">ช่วงเที่ยง-บ่าย</div>
+            <div class="desc">ROAS 24x ต่ำสุด ค่าแอดแพงสุด — ใช้ Retargeting เท่านั้น ไม่ scale Cold</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">📊</div>
+          <div class="insight-text">
+            <div class="label">ต้องระวัง</div>
+            <div class="value">Break-even ROAS</div>
+            <div class="desc">ต้องรู้ margin ของสินค้าก่อนจึงจะรู้ว่า ROAS เท่าไหร่ถึงคุ้มจริง</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: ORGANIC ====== -->
+    <div id="page-organic" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ยอด Organic</div>
+          <div class="page-sub">วัด Channel Performance — organic สูง = ช่องกำลังติด</div>
+        </div>
+      </div>
+
+      <!-- Health score as a wide insight card -->
+      <div class="chart-card" style="margin-bottom:16px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+        <div style="position:relative;width:92px;height:92px;flex-shrink:0">
+          <svg viewBox="0 0 100 100" width="92" height="92" style="transform:rotate(-90deg)">
+            <circle cx="50" cy="50" r="40" fill="none" stroke="var(--orange-pale)" stroke-width="8"/>
+            <circle id="orgHealthRing" cx="50" cy="50" r="40" fill="none" stroke="var(--orange)" stroke-width="8" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="transition:stroke-dashoffset .8s ease"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div id="orgHealthNum" style="font-family:'Prompt',sans-serif;font-size:22px;font-weight:700;color:var(--orange)">—</div>
+            <div style="font-size:10px;color:var(--text3)">Channel Score</div>
+          </div>
+        </div>
+        <div>
+          <div class="card-sub" style="margin-bottom:4px">สถานะช่อง</div>
+          <div id="orgHealthVerdict" class="card-title" style="font-size:16px;margin-bottom:6px">กำลังโหลด...</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:420px">ระบบวิเคราะห์จาก % organic ที่เพิ่มขึ้นต่อเนื่อง ถ้า organic สูงขึ้นทุกเดือน = ช่องกำลังติด = ต้นทุนแอดลดลงในระยะยาว</div>
+        </div>
+      </div>
+
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)" id="kpiOrganic"></div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">Organic vs Paid รายเดือน</div><div class="card-sub">ยิ่ง organic สูงขึ้น = ช่องยิ่งแข็งแกร่ง</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>Organic</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>Paid (Ad)</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartOrgBar" role="img" aria-label="Organic vs Paid รายเดือน">Organic vs Paid bar chart</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">% Organic Trend</div><div class="card-sub">เส้นควรขึ้นต่อเนื่อง</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartOrgTrend" role="img" aria-label="แนวโน้ม % Organic">Organic % trend line</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">% Organic แยกรายชั่วโมง</div><div class="card-sub">ชั่วโมงไหน organic สูง = ลด paid ได้</div></div>
+          </div>
+          <div class="chart-wrap" style="height:200px">
+            <canvas id="chartOrgHour" role="img" aria-label="Organic แยกรายชั่วโมง">Organic % by hour</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row" id="orgInsights"></div>
+
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:16px">รายละเอียด Organic vs Paid รายเดือน</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr><th>เดือน</th><th>ยอด Organic</th><th>ยอด Paid</th><th>% Organic</th><th>สถานะ</th></tr></thead>
+            <tbody id="orgTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: IMPORT ====== -->
+    <div id="page-import" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ตั้งค่า Channels</div>
+          <div class="page-sub">เชื่อมต่อ Google Sheet ของแต่ละช่อง — เพิ่มได้ไม่จำกัด</div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:14px">รายการช่อง</div>
+        <div id="channelInputList" style="display:flex;flex-direction:column;gap:10px"></div>
+        <button class="btn-primary" style="margin-top:14px;background:var(--white);color:var(--orange);border:1.5px dashed var(--border)" onclick="addChannelRow()">+ เพิ่มช่อง</button>
+        <div class="divider"></div>
+        <button class="btn-primary" onclick="saveChannelsAndLoad()">✅ บันทึกและโหลดข้อมูล</button>
+        <div id="setupStatusMsg" style="font-size:13px;margin-top:10px;color:var(--text3)"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:14px">วิธีหา Sheet ID</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          เปิด Google Sheet ของช่อง → ดู URL → Sheet ID คือส่วนที่อยู่ระหว่าง <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/d/</code> และ <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/edit</code><br>
+          ตัวอย่าง: <span style="color:var(--text3)">docs.google.com/spreadsheets/d/<strong>1qYnD1d...FFo8</strong>/edit</span><br><br>
+          ⚠️ ต้องตั้งค่า Sheet เป็น "Anyone with the link can view" ก่อนใช้งาน
+        </div>
+      </div>
+    </div>
+
+  </main>
 </div>
+
 <script>
-var channels=JSON.parse(localStorage.getItem('729flux_channels')||'[]');
-var currentChannel='all';
-var allData=[];
-function renderChannelList(){
-  var sel=document.getElementById('channelSelect');
-  sel.innerHTML='<option value="all">All Channels</option>';
-  channels.forEach(function(ch,i){var o=document.createElement('option');o.value=i;o.textContent=ch.name;sel.appendChild(o);});
-  var list=document.getElementById('channelList');
-  if(!channels.length){list.innerHTML='<p style="color:#aaa;text-align:center;padding:20px;font-size:13px">No channels yet</p>';return;}
-  list.innerHTML=channels.map(function(ch,i){return '<div class="channel-item"><div style="display:flex;justify-content:space-between;align-items:center"><div><b>'+ch.name+'</b><div style="font-size:11px;color:#aaa">'+ch.sheetId.substring(0,25)+'...</div></div><button onclick="removeChannel('+i+')" style="background:none;border:none;color:#ff4d4f;cursor:pointer">X</button></div></div>';}).join('');
+/* ==================== STATE & API ==================== */
+const LS_CHANNELS = "flux_channels_v3";
+let channelsCfg = JSON.parse(localStorage.getItem(LS_CHANNELS) || "[]");
+let activeChannelKey = "all";
+let RAW = null; // raw API response: { channels:[...], combined:{...} }
+
+let DATA = {
+  monthly: { labels: [], sales: [], orders: [], adSpend: [] },
+  daily:   { dates: [], sales: [] },
+  hourly:  { avg: [] },
+  hosts:   [],
+  organic: { monthly: [], hourly: [], score: 0, label: "", color: "orange" },
+};
+
+const COLORS = {
+  orange: '#EE4D2D',
+  orangeLight: '#FF7337',
+  orangePale: 'rgba(238,77,45,0.12)',
+  green: '#0F9B6A',
+  gold: '#C97D00',
+  gray: '#9B9B9B',
+  red: '#D42020',
+};
+
+const MONTH_TH = {"01":"ม.ค.","02":"ก.พ.","03":"มี.ค.","04":"เม.ย.","05":"พ.ค.","06":"มิ.ย.","07":"ก.ค.","08":"ส.ค.","09":"ก.ย.","10":"ต.ค.","11":"พ.ย.","12":"ธ.ค."};
+
+document.addEventListener("DOMContentLoaded", () => {
+  buildChannelSelectorUI();
+  renderChannelInputRows();
+  loadAllData();
+});
+
+/* ==================== FETCH ==================== */
+async function loadAllData() {
+  const sheetIds = channelsCfg.map(c => c.sheetId).filter(Boolean);
+  document.getElementById("lastUpdate").textContent = "กำลังโหลด...";
+
+  if (!sheetIds.length) {
+    RAW = buildDemoRaw();
+    mapActiveChannelToData();
+    refreshCurrentPage();
+    document.getElementById("lastUpdate").textContent = "Demo data — ยังไม่เชื่อม Sheet";
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/data?channels=${sheetIds.join(",")}&t=${Date.now()}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    RAW = json;
+    (RAW.channels||[]).forEach(ch => {
+      const cfg = channelsCfg.find(c => c.sheetId === ch.sheetId);
+      if (cfg) ch.channelName = cfg.name;
+    });
+    if (RAW.combined) RAW.combined.channelName = "รวมทุกช่อง";
+    const d = new Date(RAW.lastUpdated || Date.now());
+    document.getElementById("lastUpdate").textContent = "อัพเดต " + d.toLocaleString("th-TH",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"short"});
+  } catch(e) {
+    RAW = buildDemoRaw();
+    document.getElementById("lastUpdate").textContent = "⚠️ ใช้ demo (" + e.message + ")";
+  }
+
+  buildChannelSelectorUI();
+  mapActiveChannelToData();
+  refreshCurrentPage();
 }
-function addChannelForm(){document.getElementById('addForm').style.display='block';}
-function cancelAdd(){document.getElementById('addForm').style.display='none';document.getElementById('newChName').value='';document.getElementById('newChId').value='';}
-function saveNewChannel(){
-  var name=document.getElementById('newChName').value.trim();
-  var sheetId=document.getElementById('newChId').value.trim();
-  if(!name||!sheetId){alert('Please fill all fields');return;}
-  channels.push({name:name,sheetId:sheetId});
-  localStorage.setItem('729flux_channels',JSON.stringify(channels));
-  cancelAdd();renderChannelList();closeSettings();loadData();
+
+function getActivePage() {
+  const active = document.querySelector('.nav-item.active');
+  if (!active) return 'overview';
+  const m = active.getAttribute('onclick').match(/setPage\('(\w+)'\)/);
+  return m ? m[1] : 'overview';
 }
-function removeChannel(i){if(confirm('Remove?')){channels.splice(i,1);localStorage.setItem('729flux_channels',JSON.stringify(channels));renderChannelList();}}
-function openSettings(){renderChannelList();document.getElementById('settingsModal').classList.add('show');}
-function closeSettings(){document.getElementById('settingsModal').classList.remove('show');}
-function switchChannel(v){currentChannel=v;loadData();}
-function showSection(sec,e){
-  if(e){document.querySelectorAll('.sidebar-menu li').forEach(function(l){l.classList.remove('active');});e.target.classList.add('active');}
-  document.getElementById('pageTitle').textContent={overview:'Overview',orders:'Orders',products:'Products',summary:'Revenue Summary'}[sec]||sec;
-  renderSection(sec);
+
+function refreshCurrentPage() {
+  const page = getActivePage();
+  renderKPIs(document.getElementById('monthFilter') ? document.getElementById('monthFilter').value : 'all');
+  initChartsForPage(page);
 }
-function loadData(){
-  if(!channels.length){document.getElementById('contentArea').innerHTML='<div style="text-align:center;padding:60px"><div style="font-size:48px">&#128203;</div><h3 style="margin:15px 0 8px">No channels</h3><p style="color:#aaa;font-size:14px">Click Settings to add a Google Sheet</p><button class="btn-primary" onclick="openSettings()" style="margin-top:20px">Settings</button></div>';return;}
-  var sb=document.getElementById('statusBar');sb.style.cssText='background:#fff7f5;border:1px solid #ffd8cc;border-radius:6px;padding:10px 14px;margin-bottom:20px;font-size:13px;color:#ee4d2d;display:block';sb.textContent='Loading...';
-  document.getElementById('contentArea').innerHTML='<div class="loading">Loading data...</div>';
-  var fetchChannels=currentChannel==='all'?channels:[channels[parseInt(currentChannel)]];
-  var combined=[];var pending=fetchChannels.length;
-  fetchChannels.forEach(function(ch){
-    fetch('/api/data?sheetId='+ch.sheetId).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(j){
-      if(j.data)combined=combined.concat(j.data.map(function(r){r._channel=ch.name;return r;}));
-      if(--pending===0){allData=combined;sb.textContent='Loaded '+allData.length+' records | '+new Date().toLocaleTimeString();renderSection('overview');}
-    }).catch(function(err){sb.style.color='#ff4d4f';sb.textContent='Error: '+err.message;document.getElementById('contentArea').innerHTML='<div class="loading">Could not load data. Check API Key and Sheet ID.</div>';});
+
+/* ==================== CHANNEL SELECTOR ==================== */
+function buildChannelSelectorUI() {
+  const sel = document.getElementById("channelSelect");
+  if (!sel) return;
+  sel.innerHTML = "";
+  const chans = RAW ? (RAW.channels||[]) : [];
+  if (chans.length > 1) {
+    const o = document.createElement("option"); o.value = "all"; o.textContent = "🔀 รวมทุกช่อง"; sel.appendChild(o);
+  }
+  chans.forEach(ch => {
+    const o = document.createElement("option"); o.value = ch.sheetId; o.textContent = "📺 " + (ch.channelName||"ช่อง"); sel.appendChild(o);
+  });
+  if (!chans.length) {
+    const o = document.createElement("option"); o.value = "all"; o.textContent = "📺 729flux (demo)"; sel.appendChild(o);
+  }
+  if ([...sel.options].some(o=>o.value===activeChannelKey)) sel.value = activeChannelKey;
+  else activeChannelKey = sel.value;
+}
+
+function switchChannel() {
+  activeChannelKey = document.getElementById("channelSelect").value;
+  mapActiveChannelToData();
+  refreshCurrentPage();
+}
+
+function getActiveChannelData() {
+  if (!RAW) return null;
+  if (activeChannelKey === "all") return RAW.combined || (RAW.channels||[])[0];
+  return (RAW.channels||[]).find(c => c.sheetId === activeChannelKey) || RAW.combined;
+}
+
+/* ==================== MAP API DATA -> DATA (same shape as before) ==================== */
+function mapActiveChannelToData() {
+  const d = getActiveChannelData();
+  if (!d) return;
+
+  const monthly = d.monthly || [];
+  DATA.monthly = {
+    labels:  monthly.map(m => m.label + " 69"),
+    sales:   monthly.map(m => m.sales),
+    orders:  monthly.map(m => m.orders),
+    adSpend: monthly.map(m => m.adSpend),
+    roas:    monthly.map(m => m.roas),
+    months:  monthly.map(m => m.month),
+  };
+
+  const daily = d.daily || [];
+  DATA.daily = {
+    dates: daily.map(x => x.date.slice(5).replace("-", "/")),
+    sales: daily.map(x => x.sales),
+  };
+
+  const hourly = d.hourly || [];
+  DATA.hourly = { avg: hourly.map(h => h.avgSales), roas: hourly.map(h=>h.avgRoas) };
+
+  DATA.hosts = (d.hosts||[]).filter(h=>h.name && h.name !== "ไม่ระบุ").map(h => ({
+    name: h.name, gmv: h.sales, hours: h.hours || 1, best: h.best || "—",
+  }));
+
+  const org = d.organic || {};
+  DATA.organic = {
+    monthly: org.monthly || [],
+    hourly:  org.hourly || [],
+    score:   org.channelHealthScore || 0,
+    label:   org.healthLabel || "ยังไม่มีข้อมูล organic",
+    color:   org.healthColor || "gray",
+  };
+
+  rebuildMonthFilterOptions();
+}
+
+function rebuildMonthFilterOptions() {
+  const sel = document.getElementById('monthFilter');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="all">ทุกเดือน</option>';
+  (DATA.monthly.months||[]).forEach((m,i) => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = DATA.monthly.labels[i];
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+</script>
+<script>
+/* ==================== NAV ==================== */
+function setPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (id === 'overview') renderKPIs(document.getElementById('monthFilter') ? document.getElementById('monthFilter').value : 'all');
+  initChartsForPage(id);
+}
+
+/* ==================== KPI STRIP ==================== */
+function renderKPIs(monthVal) {
+  const strip = document.getElementById('kpiStrip');
+  if (!strip) return;
+  const months = DATA.monthly.months || [];
+  let totalSales, salesChange, totalOrders, totalAd, idx;
+
+  if (!monthVal || monthVal === 'all') {
+    totalSales  = DATA.monthly.sales.reduce((a,b)=>a+b,0);
+    totalOrders = DATA.monthly.orders.reduce((a,b)=>a+b,0);
+    totalAd     = DATA.monthly.adSpend.reduce((a,b)=>a+b,0);
+    salesChange = null;
+  } else {
+    idx = months.indexOf(monthVal);
+    totalSales  = DATA.monthly.sales[idx]||0;
+    totalOrders = DATA.monthly.orders[idx]||0;
+    totalAd     = DATA.monthly.adSpend[idx]||0;
+    const prev  = DATA.monthly.sales[idx-1];
+    salesChange = (idx>0 && prev>0) ? ((totalSales-prev)/prev*100).toFixed(1) : null;
+  }
+
+  const roasVal = (!monthVal||monthVal==='all')
+    ? avgNonZero(DATA.monthly.roas)
+    : (DATA.monthly.roas[idx]||0);
+
+  strip.innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-emoji">💰</div>
+      <div class="kpi-label">ยอดขายรวม</div>
+      <div class="kpi-value">฿${fmtK(totalSales)}</div>
+      ${salesChange !== null ? `<div class="kpi-change ${salesChange>=0?'up':'down'}">${salesChange>=0?'▲':'▼'} ${Math.abs(salesChange)}% MoM</div>` : '<div class="kpi-change neutral">เดือนแรก</div>'}
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-emoji">📦</div>
+      <div class="kpi-label">คำสั่งซื้อ</div>
+      <div class="kpi-value">${totalOrders > 0 ? totalOrders.toLocaleString() : '—'}</div>
+      <div class="kpi-change neutral">orders</div>
+    </div>
+    <div class="kpi-card gold">
+      <div class="kpi-emoji">📣</div>
+      <div class="kpi-label">ค่าแอดรวม</div>
+      <div class="kpi-value">฿${fmtK(totalAd)}</div>
+      <div class="kpi-change neutral">รวมทุก session</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-emoji">📈</div>
+      <div class="kpi-label">ROAS เฉลี่ย</div>
+      <div class="kpi-value">${roasVal > 0 ? roasVal.toFixed(1)+'x' : 'N/A'}</div>
+      <div class="kpi-change up">ยอด/ค่าแอด</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-emoji">🛒</div>
+      <div class="kpi-label">% Organic</div>
+      <div class="kpi-value">${lastOrganicPct()}%</div>
+      <div class="kpi-change neutral">เดือนล่าสุด</div>
+    </div>
+  `;
+}
+
+function avgNonZero(arr) {
+  const f = (arr||[]).filter(v=>v>0);
+  return f.length ? f.reduce((a,b)=>a+b,0)/f.length : 0;
+}
+function lastOrganicPct() {
+  const m = DATA.organic.monthly;
+  return m && m.length ? (m[m.length-1].orgPct||0) : 0;
+}
+
+function filterMonth() {
+  const m = document.getElementById('monthFilter').value;
+  renderKPIs(m);
+}
+
+/* ==================== CHARTS ==================== */
+const charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function initChartsForPage(page) {
+  if (page === 'overview' || page === undefined) initOverviewCharts();
+  if (page === 'mom') initMoMCharts();
+  if (page === 'organic') initOrganicCharts();
+  if (page === 'hourly') { initHourlyChart(); buildHeatmap(); }
+  if (page === 'campaign') initCampaignCharts();
+  if (page === 'hosts') initHostCharts();
+  if (page === 'ads') initAdsCharts();
+}
+
+function initOverviewCharts() {
+  destroyChart('monthly'); destroyChart('daily');
+
+  charts['monthly'] = new Chart(document.getElementById('chartMonthly'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [
+        { label: 'ยอดขาย (฿)', data: DATA.monthly.sales, backgroundColor: DATA.monthly.sales.map((_,i)=> i===DATA.monthly.sales.length-1?COLORS.orange:COLORS.orangePale), borderColor: COLORS.orange, borderWidth: 2, borderRadius: 8, yAxisID: 'y' },
+        { label: 'คำสั่งซื้อ', data: DATA.monthly.orders, type: 'line', borderColor: COLORS.green, backgroundColor: 'transparent', pointBackgroundColor: COLORS.green, borderWidth: 2.5, pointRadius: 6, yAxisID: 'y2' }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '฿'+(v/1000).toFixed(0)+'K', font:{size:11} }, grid: { color: 'rgba(238,77,45,0.08)' } },
+        y2: { position: 'right', ticks: { font:{size:11} }, grid: { display: false } }
+      }
+    }
+  });
+
+  charts['daily'] = new Chart(document.getElementById('chartDaily'), {
+    type: 'line',
+    data: {
+      labels: DATA.daily.dates,
+      datasets: [{
+        label: 'ยอดขาย/วัน', data: DATA.daily.sales,
+        borderColor: COLORS.orange, backgroundColor: 'rgba(238,77,45,0.08)',
+        borderWidth: 2, pointRadius: 3, pointBackgroundColor: COLORS.orange,
+        fill: true, tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font:{size:9}, maxRotation: 45, autoSkip: true, maxTicksLimit: 20 } },
+        y: { ticks: { callback: v => '฿'+(v/1000).toFixed(0)+'K', font:{size:10} }, grid: { color: 'rgba(238,77,45,0.08)' } }
+      }
+    }
   });
 }
-function renderSection(sec){
-  var area=document.getElementById('contentArea');
-  if(sec==='overview'){
-    var total=allData.length;
-    var rev=allData.reduce(function(s,r){return s+(parseFloat(r['ยอดขาย']||r['ราคา']||r['price']||0));},0);
-    var done=allData.filter(function(r){var st=(r['สถานะ']||r['status']||'').toLowerCase();return st.includes('complete')||st.includes('success')||st.includes('สำเร็จ');}).length;
-    area.innerHTML='<div class="stats-grid"><div class="stat-card"><div class="label">Total Orders</div><div class="value">'+total.toLocaleString()+'</div></div><div class="stat-card green"><div class="label">Total Revenue</div><div class="value">'+rev.toLocaleString(undefined,{maximumFractionDigits:0})+'</div></div><div class="stat-card blue"><div class="label">Completed</div><div class="value">'+done+'</div></div><div class="stat-card purple"><div class="label">Channels</div><div class="value">'+channels.length+'</div></div></div>'+renderTable(allData.slice(0,50),'Latest 50 Orders');
-  }else if(sec==='orders'){area.innerHTML=renderTable(allData,'All Orders');}
-  else if(sec==='products'){
-    var pc={};allData.forEach(function(r){var p=r['ชื่อสินค้า']||r['สินค้า']||r['product']||'Unknown';pc[p]=(pc[p]||0)+1;});
-    area.innerHTML='<div class="table-card"><h2>Products</h2><table><tr><th>#</th><th>Product</th><th>Orders</th></tr>'+Object.entries(pc).sort(function(a,b){return b[1]-a[1];}).map(function(p,i){return '<tr><td>'+(i+1)+'</td><td>'+p[0]+'</td><td>'+p[1]+'</td></tr>';}).join('')+'</table></div>';
-  }else if(sec==='summary'){
-    var by={};allData.forEach(function(r){var ch=r._channel||'All';if(!by[ch])by[ch]={orders:0,revenue:0};by[ch].orders++;by[ch].revenue+=parseFloat(r['ยอดขาย']||r['ราคา']||r['price']||0);});
-    area.innerHTML='<div class="table-card"><h2>Revenue by Channel</h2><table><tr><th>Channel</th><th>Orders</th><th>Revenue</th></tr>'+Object.entries(by).map(function(e){return '<tr><td>'+e[0]+'</td><td>'+e[1].orders+'</td><td>'+e[1].revenue.toLocaleString(undefined,{maximumFractionDigits:0})+'</td></tr>';}).join('')+'</table></div>';
+
+function initMoMCharts() {
+  destroyChart('mom'); destroyChart('momOrders');
+  const n = DATA.monthly.labels.length;
+  charts['mom'] = new Chart(document.getElementById('chartMoM'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [{
+        data: DATA.monthly.sales,
+        backgroundColor: DATA.monthly.sales.map((_,i)=> i===n-1?COLORS.orange:'rgba(238,77,45,0.3)'),
+        borderRadius: 8, borderWidth: 0
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: {display:false} },
+      scales: { y: { ticks: { callback: v => '฿'+(v/1000).toFixed(0)+'K', font:{size:11} }, grid:{color:'rgba(238,77,45,0.08)'} } } }
+  });
+  charts['momOrders'] = new Chart(document.getElementById('chartMoMOrders'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [{ data: DATA.monthly.orders, backgroundColor: DATA.monthly.orders.map((_,i)=> i===n-1?COLORS.green:'rgba(15,155,106,0.2)'), borderRadius: 8 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} },
+      scales: { y: { ticks: {font:{size:11}}, grid:{color:'rgba(0,0,0,0.04)'} } } }
+  });
+
+  // Update MoM cards + insight texts dynamically
+  renderMoMHero();
+}
+
+function renderMoMHero() {
+  const grid = document.querySelector('#page-mom .mom-grid');
+  if (!grid) return;
+  const labels = DATA.monthly.labels;
+  const sales  = DATA.monthly.sales;
+  const orders = DATA.monthly.orders;
+  const last3idx = labels.map((_,i)=>i).slice(-3);
+
+  grid.innerHTML = last3idx.map((idx,i) => {
+    const isCurrent = i === last3idx.length - 1;
+    const prevIdx = last3idx[i-1];
+    const pct = prevIdx!==undefined && sales[prevIdx]>0 ? ((sales[idx]-sales[prevIdx])/sales[prevIdx]*100) : null;
+    const badge = pct===null ? '<div class="mom-change-badge tag-gray">เดือนแรก</div>' :
+      pct>=0 ? `<div class="mom-change-badge tag-green">▲ +${pct.toFixed(1)}% MoM</div>` :
+               `<div class="mom-change-badge tag-red">▼ ${Math.abs(pct).toFixed(1)}% MoM</div>`;
+    return `<div class="mom-card ${isCurrent?'current':''}">
+      <div class="mom-month">${labels[idx]}${isCurrent?' 🔥':''}</div>
+      <div class="mom-main">฿${(sales[idx]||0).toLocaleString()}</div>
+      <div class="mom-sub">${orders[idx]>0?orders[idx].toLocaleString()+' orders':'—'}</div>
+      ${badge}
+    </div>`;
+  }).join('');
+
+  const insightRow = document.querySelector('#page-mom .insight-row');
+  if (insightRow) {
+    const lastIdx = labels.length-1, prevIdx = labels.length-2;
+    const growth = prevIdx>=0 && sales[prevIdx]>0 ? ((sales[lastIdx]-sales[prevIdx])/sales[prevIdx]*100) : null;
+    insightRow.innerHTML = `
+      <div class="insight-card">
+        <div class="insight-icon orange">🚀</div>
+        <div class="insight-text">
+          <div class="label">การเติบโตล่าสุด</div>
+          <div class="value">${growth!==null?(growth>=0?'+':'')+growth.toFixed(1)+'%':'—'} ${labels[prevIdx]||''}→${labels[lastIdx]||''}</div>
+          <div class="desc">เทียบเดือนล่าสุดกับเดือนก่อนหน้า</div>
+        </div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon green">✅</div>
+        <div class="insight-text">
+          <div class="label">เดือนนี้</div>
+          <div class="value">฿${(sales[lastIdx]||0).toLocaleString()}</div>
+          <div class="desc">${labels[lastIdx]||''} — orders ${orders[lastIdx]>0?orders[lastIdx].toLocaleString():'—'}</div>
+        </div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon gold">🎯</div>
+        <div class="insight-text">
+          <div class="label">เป้าหมายเดือนหน้า (+15%)</div>
+          <div class="value">฿${Math.round((sales[lastIdx]||0)*1.15).toLocaleString()}</div>
+          <div class="desc">ต้องการเพิ่ม ฿${Math.round((sales[lastIdx]||0)*0.15).toLocaleString()}</div>
+        </div>
+      </div>
+    `;
   }
 }
-function renderTable(data,title){
-  if(!data||!data.length)return '<div class="loading">No data</div>';
-  var keys=Object.keys(data[0]).filter(function(k){return k!=='_channel';});
-  return '<div class="table-card"><h2>'+title+'</h2><div style="overflow-x:auto"><table><tr>'+keys.map(function(k){return '<th>'+k+'</th>';}).join('')+'</tr>'+data.map(function(row){return '<tr>'+keys.map(function(k){var v=row[k]||'';var b=v;if(typeof v==='string'){if(v.includes('สำเร็จ')||v.toLowerCase().includes('complete'))b='<span class="badge badge-success">'+v+'</span>';else if(v.includes('รอ')||v.toLowerCase().includes('pending'))b='<span class="badge badge-pending">'+v+'</span>';else if(v.includes('ยกเลิก')||v.toLowerCase().includes('cancel'))b='<span class="badge badge-cancel">'+v+'</span>';}return '<td>'+b+'</td>';}).join('')+'</tr>';}).join('')+'</table></div></div>';
+
+/* ==================== ORGANIC CHARTS (new page) ==================== */
+function initOrganicCharts() {
+  destroyChart('orgBar'); destroyChart('orgTrend'); destroyChart('orgHour');
+  const org = DATA.organic;
+  const monthly = org.monthly || [];
+  const hourly  = org.hourly  || [];
+
+  // Health ring
+  const circ = 251.2;
+  const score = org.score || 0;
+  const offset = circ - circ*(score/100);
+  const col = org.color === 'green' ? COLORS.green : org.color === 'gold' ? COLORS.gold : COLORS.orange;
+  const ring = document.getElementById('orgHealthRing');
+  if (ring) { ring.style.stroke = col; setTimeout(()=>ring.style.strokeDashoffset = offset, 50); }
+  const numEl = document.getElementById('orgHealthNum');
+  if (numEl) { numEl.textContent = score || '—'; numEl.style.color = col; }
+  const verdictEl = document.getElementById('orgHealthVerdict');
+  if (verdictEl) { verdictEl.textContent = org.label || 'ยังไม่มีข้อมูล'; verdictEl.style.color = col; }
+
+  // KPIs
+  const last = monthly[monthly.length-1] || {};
+  const prev = monthly[monthly.length-2] || {};
+  const diff = (prev.orgPct>0) ? (last.orgPct - prev.orgPct) : null;
+  const kpiOrg = document.getElementById('kpiOrganic');
+  if (kpiOrg) {
+    kpiOrg.innerHTML = `
+      <div class="kpi-card green"><div class="kpi-emoji">🌱</div><div class="kpi-label">% Organic เดือนนี้</div><div class="kpi-value">${last.orgPct||0}%</div><div class="kpi-change ${diff>=0?'up':'down'}">${diff!==null?(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'%':'—'}</div></div>
+      <div class="kpi-card"><div class="kpi-emoji">📣</div><div class="kpi-label">% Paid เดือนนี้</div><div class="kpi-value">${last.adPct||0}%</div><div class="kpi-change neutral">ยิ่งลดยิ่งดี</div></div>
+      <div class="kpi-card gold"><div class="kpi-emoji">💰</div><div class="kpi-label">ยอด Organic รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.orgGmv||0),0))}</div><div class="kpi-change neutral">ทุกเดือน</div></div>
+      <div class="kpi-card"><div class="kpi-emoji">📊</div><div class="kpi-label">ยอด Paid รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.adGmv||0),0))}</div><div class="kpi-change neutral">ทุกเดือน</div></div>
+    `;
+  }
+
+  charts['orgBar'] = new Chart(document.getElementById('chartOrgBar'), {
+    type: 'bar',
+    data: { labels: monthly.map(m=>m.label), datasets: [
+      { label:'Organic', data: monthly.map(m=>m.orgGmv), backgroundColor: COLORS.green, borderRadius:4 },
+      { label:'Paid', data: monthly.map(m=>m.adGmv), backgroundColor: COLORS.orange, borderRadius:4 }
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{stacked:true}, y:{stacked:true, ticks:{callback:v=>'฿'+(v/1000).toFixed(0)+'K',font:{size:11}}, grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  charts['orgTrend'] = new Chart(document.getElementById('chartOrgTrend'), {
+    type:'line',
+    data:{ labels: monthly.map(m=>m.label), datasets:[{ label:'% Organic', data: monthly.map(m=>m.orgPct), borderColor: COLORS.green, backgroundColor:'rgba(15,155,106,0.1)', borderWidth:2.5, pointRadius:6, pointBackgroundColor:COLORS.green, fill:true, tension:0.3 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  charts['orgHour'] = new Chart(document.getElementById('chartOrgHour'), {
+    type:'bar',
+    data:{ labels: hourly.map(h=>h.hour+':00'), datasets:[{ label:'% Organic', data: hourly.map(h=>h.orgPct), backgroundColor: hourly.map(h=>h.orgPct>50?'rgba(15,155,106,0.8)':h.orgPct>25?'rgba(15,155,106,0.4)':'rgba(238,77,45,0.3)'), borderRadius:3 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{font:{size:9},maxRotation:45,autoSkip:false}}, y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  // Insights
+  const bestOrgHour = hourly.length ? hourly.reduce((a,b)=> a.orgPct>b.orgPct?a:b) : {hour:'—',orgPct:0};
+  const ins = document.getElementById('orgInsights');
+  if (ins) {
+    ins.innerHTML = `
+      <div class="insight-card"><div class="insight-icon green">🌱</div><div class="insight-text"><div class="label">ชั่วโมง organic ดีสุด</div><div class="value">${bestOrgHour.hour}:00 น. (${bestOrgHour.orgPct}%)</div><div class="desc">ช่วงนี้ลด paid ได้ ลูกค้า discover ช่องเองมากที่สุด</div></div></div>
+      <div class="insight-card"><div class="insight-icon orange">${diff>0?'📈':diff<0?'📉':'❓'}</div><div class="insight-text"><div class="label">Trend organic</div><div class="value">${diff!==null?(diff>=0?'เพิ่มขึ้น ':'ลดลง ')+Math.abs(diff)+'%':'ยังไม่มีข้อมูล'}</div><div class="desc">${diff>0?'ดี! organic กำลังเติบโต — ช่องกำลังติด':diff<0?'ระวัง organic ลดลง — ต้องเพิ่ม content quality':'รอข้อมูลอีกเดือนเพื่อบอก trend'}</div></div></div>
+      <div class="insight-card"><div class="insight-icon gold">💡</div><div class="insight-text"><div class="label">คำแนะนำ</div><div class="value">${score>=60?'รักษา momentum':score>=35?'เพิ่ม engagement':'สร้าง organic ก่อน'}</div><div class="desc">${score>=60?'ช่องกำลังแข็งแกร่ง — focus ที่ conversion มากกว่า acquisition':score>=35?'ทำ content ที่ shareable เช่น before/after, demo สินค้า':'เพิ่มความสม่ำเสมอในการไลฟ์ และตอบ comment ให้มากขึ้น'}</div></div></div>
+    `;
+  }
+
+  const tbl = document.getElementById('orgTable');
+  if (tbl) {
+    tbl.innerHTML = monthly.map(m => {
+      const tagC = m.orgPct>=60?'tag-green':m.orgPct>=35?'tag-gold':m.orgPct>0?'tag-orange':'tag-gray';
+      const status = m.orgPct>=60?'ช่องติด 🔥':m.orgPct>=35?'กำลังเติบโต':m.orgPct>0?'ต้องพัฒนา':'ไม่มีข้อมูล';
+      return `<tr><td>${m.label}</td><td>฿${(m.orgGmv||0).toLocaleString()}</td><td>฿${(m.adGmv||0).toLocaleString()}</td><td>${m.orgPct||0}%</td><td><span class="tag ${tagC}">${status}</span></td></tr>`;
+    }).join('');
+  }
 }
-renderChannelList();loadData();
+
+function initHourlyChart() {
+  destroyChart('hourly');
+  const colors = DATA.hourly.avg.map(v => {
+    if (v > 9000) return COLORS.orange;
+    if (v > 6000) return COLORS.orangeLight;
+    if (v > 3000) return 'rgba(238,77,45,0.5)';
+    return 'rgba(238,77,45,0.25)';
+  });
+  charts['hourly'] = new Chart(document.getElementById('chartHourly'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:24},(_,i)=>i+':00'),
+      datasets: [{ label: 'ยอดขายเฉลี่ย/ชม.', data: DATA.hourly.avg, backgroundColor: colors, borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend:{display:false} },
+      scales: {
+        x: { ticks: { font:{size:10}, maxRotation:45, autoSkip:false } },
+        y: { ticks: { callback: v => '฿'+(v/1000).toFixed(0)+'K', font:{size:10} }, grid:{color:'rgba(238,77,45,0.08)'} }
+      }
+    }
+  });
+
+  // Update the 4-slot KPI strip on hourly page dynamically
+  const slots = [{l:'ดึก 00-06',r:[0,5],emoji:'🌙'},{l:'เช้า 06-12',r:[6,11],emoji:'☀️'},{l:'เที่ยง-บ่าย 12-18',r:[12,17],emoji:'🌤️'},{l:'เย็น 18-24',r:[18,23],emoji:'🔥'}];
+  const sales = DATA.hourly.avg, roas = DATA.hourly.roas||[];
+  const sd = slots.map(s => {
+    const sSum = sales.slice(s.r[0], s.r[1]+1).reduce((a,b)=>a+b,0);
+    const rArr = roas.slice(s.r[0], s.r[1]+1).filter(v=>v>0);
+    return { ...s, sales:sSum, roas: rArr.length ? (rArr.reduce((a,b)=>a+b,0)/rArr.length) : 0 };
+  });
+  const maxS = Math.max(...sd.map(s=>s.sales));
+  const stripEl = document.querySelector('#page-hourly .kpi-strip');
+  if (stripEl) {
+    stripEl.innerHTML = sd.map(s => `
+      <div class="kpi-card ${s.sales===maxS?'':'green'}">
+        <div class="kpi-emoji">${s.emoji}</div>
+        <div class="kpi-label">${s.l}</div>
+        <div class="kpi-value">฿${fmtK(s.sales)}</div>
+        <div class="kpi-change ${s.sales===maxS?'up':'neutral'}">ROAS ${s.roas.toFixed(0)}x ${s.sales===maxS?'PEAK 🔥':''}</div>
+      </div>`).join('');
+  }
+}
+
+function buildHeatmap() {
+  const days = ['จ.','อ.','พ.','พฤ.','ศ.','ส.','อา.'];
+  const hours = [0,2,4,6,8,10,12,14,16,18,20,22];
+  const avg = DATA.hourly.avg.length ? DATA.hourly.avg : Array(24).fill(0);
+  const dayScale = [0.85,0.88,0.90,0.87,0.92,1.15,1.25];
+  const maxVal = Math.max(...avg) * 1.25 || 1;
+  let html = '<tr><th></th>';
+  hours.forEach(h => html += `<th>${h}:00</th>`);
+  html += '</tr>';
+  days.forEach((d, di) => {
+    html += `<tr><td class="hm-label">${d}</td>`;
+    hours.forEach(h => {
+      const v = Math.round((avg[h]||0) * dayScale[di]);
+      const pct = v / maxVal;
+      const alpha = 0.12 + pct * 0.82;
+      const bg = `rgba(238,77,45,${alpha.toFixed(2)})`;
+      const textColor = pct > 0.55 ? '#fff' : '#A06050';
+      html += `<td style="background:${bg};color:${textColor}" title="${d} ${h}:00 ≈ ฿${(v/1000).toFixed(1)}K">${(v/1000).toFixed(1)}K</td>`;
+    });
+    html += '</tr>';
+  });
+  document.getElementById('heatmapTable').innerHTML = html;
+}
+
+function initCampaignCharts() {
+  destroyChart('campaign'); destroyChart('campaignPie'); destroyChart('campaignBar');
+  const d = getActiveChannelData();
+  const camp = (d && d.campaign) || [];
+  const colMap = [COLORS.orange, COLORS.green, COLORS.gold, COLORS.gray, 'rgba(155,155,155,0.4)'];
+
+  charts['campaign'] = new Chart(document.getElementById('chartCampaign'), {
+    type: 'bar',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.avgPerDay), backgroundColor: colMap, borderRadius: 8 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}},
+      scales:{ y:{ticks:{callback:v=>'฿'+(v/1000).toFixed(0)+'K',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  charts['campaignPie'] = new Chart(document.getElementById('chartCampaignPie'), {
+    type: 'doughnut',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.total), backgroundColor: colMap, borderWidth: 2, borderColor: '#fff' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} }, cutout:'60%' }
+  });
+
+  charts['campaignBar'] = new Chart(document.getElementById('chartCampaignBar'), {
+    type: 'bar',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.avgPerDay), backgroundColor: colMap, borderRadius: 8 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:11}}},y:{ticks:{callback:v=>'฿'+(v/1000).toFixed(0)+'K',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  const tbody = document.querySelector('#page-campaign .data-table tbody');
+  if (tbody) {
+    tbody.innerHTML = camp.map(c => {
+      const tagC = c.vsNormal>50?'tag-green':c.vsNormal>0?'tag-gold':c.vsNormal<0?'tag-red':'tag-gray';
+      return `<tr><td>${c.label}</td><td><span class="tag ${tagC}">${c.vsNormal>0?'▲ +':''}${c.vsNormal}%</span></td><td>฿${(c.total||0).toLocaleString()}</td><td colspan="2">เฉลี่ย ฿${(c.avgPerDay||0).toLocaleString()}/วัน (${c.count} วัน)</td></tr>`;
+    }).join('');
+  }
+}
+
+function initHostCharts() {
+  destroyChart('hosts'); destroyChart('hostPie');
+  const sorted = [...DATA.hosts].sort((a,b)=>b.gmv-a.gmv);
+
+  charts['hosts'] = new Chart(document.getElementById('chartHosts'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(h=>h.name),
+      datasets: [{ data: sorted.map(h=>h.gmv), backgroundColor: sorted.map((_,i)=>i===0?COLORS.orange:i===1?COLORS.orangeLight:'rgba(238,77,45,0.3)'), borderRadius:6 }]
+    },
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{x:{ticks:{callback:v=>'฿'+(v/1000).toFixed(0)+'K',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}},y:{ticks:{font:{size:12}}}} }
+  });
+
+  charts['hostPie'] = new Chart(document.getElementById('chartHostPie'), {
+    type: 'doughnut',
+    data: {
+      labels: sorted.map(h=>h.name),
+      datasets: [{
+        data: sorted.map(h=>h.gmv),
+        backgroundColor: [COLORS.orange,'#FF7337','#FF9B7A','rgba(238,77,45,0.6)','rgba(238,77,45,0.45)','rgba(238,77,45,0.3)','rgba(238,77,45,0.2)','rgba(238,77,45,0.12)'],
+        borderWidth:2, borderColor:'#fff'
+      }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'55%' }
+  });
+
+  const tbody = document.getElementById('hostTable');
+  tbody.innerHTML = sorted.map((h,i) => {
+    const rankClass = i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':'rank-n';
+    const avg = Math.round(h.gmv / h.hours);
+    const pct = sorted[0].gmv ? Math.round(h.gmv / sorted[0].gmv * 100) : 0;
+    return `<tr>
+      <td><span class="rank-badge ${rankClass}">${i+1}</span></td>
+      <td><strong>${h.name}</strong></td>
+      <td>฿${(h.gmv/1000).toFixed(0)}K<div class="pbar-wrap"><div class="pbar" style="width:${pct}%"></div></div></td>
+      <td>${h.hours} ชม.</td>
+      <td>฿${(avg/1000).toFixed(1)}K</td>
+      <td><span class="tag tag-orange">${h.best}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function initAdsCharts() {
+  destroyChart('ads'); destroyChart('roas');
+
+  charts['ads'] = new Chart(document.getElementById('chartAds'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [
+        { label: 'ยอดขาย', data: DATA.monthly.sales, backgroundColor: COLORS.orange, borderRadius:6, yAxisID:'y' },
+        { label: 'ค่าแอด', data: DATA.monthly.adSpend, backgroundColor: COLORS.gold, borderRadius:6, yAxisID:'y' }
+      ]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>'฿'+(v/1000).toFixed(0)+'K',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  const periods = [{l:'ดึก 00-06',r:[0,5]},{l:'เช้า 06-12',r:[6,11]},{l:'บ่าย 12-18',r:[12,17]},{l:'เย็น 18-24',r:[18,23]}];
+  const roasArr = DATA.hourly.roas || [];
+  const rd = periods.map(p => {
+    const slice = roasArr.slice(p.r[0], p.r[1]+1).filter(v=>v>0);
+    return slice.length ? slice.reduce((a,b)=>a+b,0)/slice.length : 0;
+  });
+
+  charts['roas'] = new Chart(document.getElementById('chartROAS'), {
+    type: 'bar',
+    data: {
+      labels: periods.map(p=>p.l),
+      datasets: [{
+        data: rd.map(v=>+v.toFixed(1)),
+        backgroundColor: [COLORS.orange, 'rgba(238,77,45,0.6)', 'rgba(238,77,45,0.35)', 'rgba(238,77,45,0.5)'],
+        borderRadius:8
+      }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>v+'x',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  // KPI strip on Ads page
+  const totalAd = DATA.monthly.adSpend.reduce((a,b)=>a+b,0);
+  const totalSales = DATA.monthly.sales.reduce((a,b)=>a+b,0);
+  const overallRoas = totalAd>0 ? (totalSales/totalAd) : 0;
+  const best = rd.reduce((maxIdx,v,i,arr)=> v>arr[maxIdx]?i:maxIdx, 0);
+  const stripEl = document.querySelector('#page-ads .kpi-strip');
+  if (stripEl) {
+    stripEl.innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">ค่าแอดรวม</div><div class="kpi-value">฿${fmtK(totalAd)}</div><div class="kpi-change neutral">ทุก session</div></div>
+      <div class="kpi-card green"><div class="kpi-label">ROAS รวม</div><div class="kpi-value">${overallRoas>0?overallRoas.toFixed(1)+'x':'N/A'}</div><div class="kpi-change up">ยอดขาย/ค่าแอด</div></div>
+      <div class="kpi-card gold"><div class="kpi-label">ROAS ดีที่สุด</div><div class="kpi-value">${rd[best]?rd[best].toFixed(0)+'x':'—'}</div><div class="kpi-change up">${periods[best]?periods[best].l:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">เฉลี่ยต่อเดือน</div><div class="kpi-value">฿${fmtK(DATA.monthly.labels.length?totalAd/DATA.monthly.labels.length:0)}</div><div class="kpi-change neutral">ค่าแอด/เดือน</div></div>
+    `;
+  }
+}
+
+/* ==================== SETUP / CHANNEL CONFIG PAGE ==================== */
+function renderChannelInputRows() {
+  const list = document.getElementById('channelInputList');
+  if (!list) return;
+  if (!channelsCfg.length) channelsCfg = [{ name: '729flux', sheetId: '' }];
+  list.innerHTML = channelsCfg.map((c,i) => `
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="select-styled" style="flex:1;min-width:100px" placeholder="ชื่อช่อง" value="${c.name||''}" oninput="channelsCfg[${i}].name=this.value">
+      <input class="select-styled" style="flex:2" placeholder="Sheet ID" value="${c.sheetId||''}" oninput="channelsCfg[${i}].sheetId=this.value.trim()">
+      ${channelsCfg.length>1 ? `<button class="btn-primary" style="background:var(--red-bg);color:var(--red);padding:8px 12px" onclick="removeChannelRow(${i})">✕</button>` : ''}
+    </div>
+  `).join('');
+}
+function addChannelRow() { channelsCfg.push({ name:'ช่องใหม่', sheetId:'' }); renderChannelInputRows(); }
+function removeChannelRow(i) { channelsCfg.splice(i,1); renderChannelInputRows(); }
+
+async function saveChannelsAndLoad() {
+  const valid = channelsCfg.filter(c=>c.sheetId);
+  const statusEl = document.getElementById('setupStatusMsg');
+  if (!valid.length) { statusEl.textContent = '❌ กรุณาใส่ Sheet ID อย่างน้อย 1 ช่อง'; statusEl.style.color = 'var(--red)'; return; }
+  localStorage.setItem(LS_CHANNELS, JSON.stringify(channelsCfg));
+  statusEl.textContent = '⏳ กำลังโหลดข้อมูล...'; statusEl.style.color = 'var(--text3)';
+  await loadAllData();
+  statusEl.textContent = '✅ บันทึกและโหลดสำเร็จ!'; statusEl.style.color = 'var(--green)';
+}
+
+/* ==================== DEMO DATA (fallback) ==================== */
+function buildDemoRaw() {
+  const ch = {
+    channelName: "729flux (demo)",
+    monthly: [
+      {month:"2026-03",label:"มี.ค.",sales:90754,orders:0,adSpend:0,cart:0,roas:0},
+      {month:"2026-04",label:"เม.ย.",sales:853699,orders:647,adSpend:37200,cart:2512,roas:22.9},
+      {month:"2026-05",label:"พ.ค.",sales:850454,orders:1121,adSpend:23374,cart:3264,roas:36.4},
+    ],
+    daily: [
+      {date:"2026-03-24",sales:3673},{date:"2026-03-25",sales:6980},{date:"2026-03-26",sales:16555},{date:"2026-03-27",sales:16148},{date:"2026-03-28",sales:5823},{date:"2026-03-29",sales:16779},{date:"2026-03-30",sales:30615},
+      {date:"2026-04-04",sales:163660},{date:"2026-04-06",sales:7484},{date:"2026-04-07",sales:19296},{date:"2026-04-08",sales:33530},{date:"2026-04-10",sales:26107},{date:"2026-04-12",sales:62003},{date:"2026-04-17",sales:26085},{date:"2026-04-19",sales:50338},{date:"2026-04-21",sales:27964},{date:"2026-04-23",sales:12266},{date:"2026-04-24",sales:30442},{date:"2026-04-25",sales:46643},{date:"2026-04-28",sales:51451},
+      {date:"2026-05-02",sales:100985},{date:"2026-05-03",sales:49238},{date:"2026-05-04",sales:28530},{date:"2026-05-05",sales:205907},{date:"2026-05-06",sales:247259},{date:"2026-05-07",sales:74771},{date:"2026-05-08",sales:46090},{date:"2026-05-09",sales:33081},{date:"2026-05-10",sales:21736},{date:"2026-05-11",sales:32930},{date:"2026-05-12",sales:78365},{date:"2026-05-13",sales:19487},{date:"2026-05-15",sales:3010},{date:"2026-05-21",sales:31922},{date:"2026-05-22",sales:9617},{date:"2026-05-23",sales:47084},
+    ],
+    hourly: [3358,5078,3924,2889,1460,1290,2410,3860,4290,5120,6180,7760,5430,4890,5760,4210,3870,3190,4820,7340,8560,9120,10480,11200].map((v,h)=>({hour:h,avgSales:v,avgRoas:[48,52,45,38,20,15,22,28,31,25,20,18,22,18,21,19,22,25,30,28,26,24,22,20][h]})),
+    hosts: [
+      {name:'นูไอนี',sales:412000,hours:95,best:'เย็น/กลางวัน'},
+      {name:'ดาด้า',sales:395000,hours:88,best:'เช้า-กลางวัน'},
+      {name:'นาเดีย',sales:310000,hours:112,best:'เย็น'},
+      {name:'ฟาตีเมาะห์',sales:298000,hours:108,best:'เช้า-บ่าย'},
+      {name:'ฟิรดาวส์',sales:198000,hours:52,best:'กลางวัน'},
+      {name:'นูรูฮัฟนา',sales:175000,hours:96,best:'ดึก'},
+      {name:'นารีมี',sales:142000,hours:60,best:'ดึก-เช้า'},
+    ],
+    campaign: [
+      {label:'Double Day',total:369567,avgPerDay:184784,vsNormal:730,count:2},
+      {label:'Payday (25)',total:46643,avgPerDay:46643,vsNormal:90,count:1},
+      {label:'ปลายเดือน',total:51451,avgPerDay:51451,vsNormal:110,count:1},
+      {label:'Midmonth',total:3010,avgPerDay:3010,vsNormal:-85,count:1},
+      {label:'วันปกติ',total:625000,avgPerDay:25000,vsNormal:0,count:25},
+    ],
+    organic: {
+      monthly: [
+        {month:"2026-03",label:"มี.ค.",orgGmv:0,adGmv:0,orgPct:0,adPct:100},
+        {month:"2026-04",label:"เม.ย.",orgGmv:84000,adGmv:248000,orgPct:25,adPct:75},
+        {month:"2026-05",label:"พ.ค.",orgGmv:195000,adGmv:312000,orgPct:38,adPct:62},
+      ],
+      hourly: Array.from({length:24},(_,h)=>({hour:h,orgPct:Math.min(100,Math.round(20+h*1.5))})),
+      channelHealthScore: 52,
+      healthLabel: "กำลังเติบโต ต้องดู trend ต่อ",
+      healthColor: "gold",
+    },
+  };
+  return { lastUpdated: new Date().toISOString(), channels: [ch], combined: ch };
+}
+
+/* ==================== HELPERS ==================== */
+function fmtK(n) { n = Math.round(n||0); return n>=1000 ? (n/1000).toFixed(1)+'K' : String(n); }
 </script>
 </body>
 </html>
