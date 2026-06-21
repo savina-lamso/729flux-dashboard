@@ -61,6 +61,15 @@ async function fetchChannel(sheetId, sheetName, apiKey, idx) {
 
   // Flexible column finder
   const ci = name => headers.indexOf(name);
+  // ci2: like ci, but tries multiple possible header spellings and returns the first match found.
+  // This protects against typos in the source Sheet (e.g. "ชั่วโฒง" vs "ชั่วโมง").
+  const ci2 = (...names) => {
+    for (const n of names) {
+      const idx = headers.indexOf(n);
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
   const col = {
     date:    ci("วันที่"),
     time:    ci("เวลา"),
@@ -74,7 +83,9 @@ async function fetchChannel(sheetId, sheetName, apiKey, idx) {
     ordHr:   ci("คำสั่งซื้อเพิ่มต่อชั่วโมง"),
     cartHr:  ci("รถเข็นเพิ่มต่อชั่วโมง"),
     adHr:    ci("แอดกินต่อชั่วโมง"),
-    roasHr:  ci("ROAS ต่อชั่วโมง"),
+    // "ROAS ต่อชั่วโมง" is the correct spelling, but the live Sheet has a typo:
+    // "ROAS ต่อชั่วโฒง" (โฒง instead of โมง). Try both so either spelling works.
+    roasHr:  ci2("ROAS ต่อชั่วโมง", "ROAS ต่อชั่วโฒง"),
     hour:    ci("ชม.(0-23)"),
     adGmv:   ci("ยอด Ad/ชม."),
     orgGmv:  ci("ยอด Organic/ชม."),
@@ -227,6 +238,26 @@ function buildHourly(rows) {
 }
 
 function buildHosts(rows) {
+  // Overall totals (all-time)
+  const overall = buildHostsForRows(rows);
+
+  // Per-month breakdown — needed so the dashboard can filter "host ranking" by a single month
+  const byMonth = {};
+  rows.forEach(r => {
+    if (!r.date) return;
+    const m = r.date.slice(0, 7);
+    if (!byMonth[m]) byMonth[m] = [];
+    byMonth[m].push(r);
+  });
+  const monthly = Object.keys(byMonth).sort().map(m => ({
+    month: m,
+    hosts: buildHostsForRows(byMonth[m]),
+  }));
+
+  return { all: overall, byMonth: monthly };
+}
+
+function buildHostsForRows(rows) {
   const map = {};
   rows.forEach(r => {
     const n = r.host||"ไม่ระบุ";
@@ -316,10 +347,11 @@ function mergeChannels(channels) {
     };
   });
 
-  // Merge hosts: combine across channels
+  // Merge hosts: combine "all" totals across channels
   const hostMap = {};
   channels.forEach(ch => {
-    (ch.hosts||[]).forEach(h => {
+    const chHosts = (ch.hosts && ch.hosts.all) || [];
+    chHosts.forEach(h => {
       if (!hostMap[h.name]) hostMap[h.name] = {...h, sales:0, orders:0, cart:0, hours:0, sessions:0};
       hostMap[h.name].sales   += h.sales;
       hostMap[h.name].orders  += h.orders;
@@ -327,9 +359,34 @@ function mergeChannels(channels) {
       hostMap[h.name].sessions += h.sessions;
     });
   });
-  const hosts = Object.values(hostMap)
+  const hostsAll = Object.values(hostMap)
     .map(h=>({...h, avgPerHour: h.hours?Math.round(h.sales/h.hours):0}))
     .sort((a,b)=>b.sales-a.sales);
+
+  // Merge hosts: combine per-month breakdown across channels
+  const hostMonthMap = {};
+  channels.forEach(ch => {
+    const chByMonth = (ch.hosts && ch.hosts.byMonth) || [];
+    chByMonth.forEach(mEntry => {
+      if (!hostMonthMap[mEntry.month]) hostMonthMap[mEntry.month] = {};
+      mEntry.hosts.forEach(h => {
+        const bucket = hostMonthMap[mEntry.month];
+        if (!bucket[h.name]) bucket[h.name] = {...h, sales:0, orders:0, cart:0, hours:0, sessions:0};
+        bucket[h.name].sales   += h.sales;
+        bucket[h.name].orders  += h.orders;
+        bucket[h.name].hours   += h.hours;
+        bucket[h.name].sessions += h.sessions;
+      });
+    });
+  });
+  const hostsByMonth = Object.keys(hostMonthMap).sort().map(m => ({
+    month: m,
+    hosts: Object.values(hostMonthMap[m])
+      .map(h=>({...h, avgPerHour: h.hours?Math.round(h.sales/h.hours):0}))
+      .sort((a,b)=>b.sales-a.sales),
+  }));
+
+  const hosts = { all: hostsAll, byMonth: hostsByMonth };
 
   // Merge daily
   const dayMap = {};
@@ -377,4 +434,4 @@ function mergeChannels(channels) {
 function num(v){if(v==null||v==="")return 0;const n=parseFloat(String(v).replace(/,/g,""));return isNaN(n)?0:n;}
 function clean(v){return String(v||"").trim();}
 function fmtDate(v){if(!v)return"";const m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;return v;}
-function emptyChannel(id,idx){return{sheetId:id,channelName:`ช่อง ${idx+1}`,monthly:[],hourly:[],hosts:[],daily:[],campaign:[],organic:{monthly:[],hourly:[],channelHealthScore:0,healthLabel:"ไม่มีข้อมูล",healthColor:"gray"}};}
+function emptyChannel(id,idx){return{sheetId:id,channelName:`ช่อง ${idx+1}`,monthly:[],hourly:[],hosts:{all:[],byMonth:[]},daily:[],campaign:[],organic:{monthly:[],hourly:[],channelHealthScore:0,healthLabel:"ไม่มีข้อมูล",healthColor:"gray"}};}
