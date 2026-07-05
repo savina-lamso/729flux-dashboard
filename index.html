@@ -1,946 +1,1991 @@
-const express = require('express');
-const axios = require('axios');
-const { google } = require('googleapis');
-
-const app = express();
-app.use(express.json());
-
-// ===== ตั้งค่าตรงนี้ =====
-const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GOOGLE_CREDENTIALS = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-// =========================
-
-// normalize เวลาให้เป็น HH:MM เสมอ
-function normalizeTime(t) {
-  if (!t) return '';
-  const parts = t.replace(/\s*น\.?/, '').trim().split(':');
-  const h = parts[0].padStart(2, '0');
-  const m = (parts[1] || '00').padStart(2, '0');
-  return `${h}:${m}`;
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>729flux Live Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --orange: #EE4D2D;
+  --orange-light: #FF7337;
+  --orange-pale: #FFF3F0;
+  --orange-mid: #FFE0D9;
+  --dark: #1A0A00;
+  --dark2: #2D1200;
+  --text: #1A0A00;
+  --text2: #6B3A2A;
+  --text3: #A06050;
+  --bg: #FFF8F6;
+  --white: #FFFFFF;
+  --border: rgba(238,77,45,0.15);
+  --green: #0F9B6A;
+  --green-bg: #E6F7F1;
+  --red: #D42020;
+  --red-bg: #FDECEC;
+  --gold: #C97D00;
+  --gold-bg: #FFF6E0;
+  --gray: #7A6060;
+  --gray-bg: #F5EFED;
+  --shadow: 0 2px 16px rgba(238,77,45,0.08);
+  --shadow-hover: 0 8px 32px rgba(238,77,45,0.18);
+  --radius: 14px;
+  --radius-sm: 8px;
 }
 
-// ฟังก์ชัน parse ข้อความ
-function parseMessage(text) {
-  // ลบบรรทัดคอยน์ออกก่อน parse เพื่อไม่รบกวนการอ่านข้อมูล
-  const textWithoutCoin = text.split('\n').filter(line => 
-    !line.includes('คอยน์') && 
-    !line.includes('คนดู') &&
-    !line.includes('%ค่าโฆษณา') &&
-    !line.includes('งบโฆษณา')
-  ).join('\n');
-  const cleanText = textWithoutCoin.replace(/^แก้ไข\s*/i, '').trim();
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-  const hasHeader = (cleanText.includes('ชื่อช่อง:') || cleanText.includes('ชื่อช่อง :')) &&
-                    (cleanText.includes('Session ID') || cleanText.includes('Session id'));
-  const hasHourly = cleanText.includes('ยอดขายรวม') && cleanText.includes('คำสั่งซื้อรวม');
-
-  if (!hasHeader && !hasHourly) return null;
-
-  const getTextValue = (label) => {
-    const regex = new RegExp(`${label}[：:\\s]+(.+)`);
-    const match = cleanText.match(regex);
-    return match ? match[1].trim() : '';
-  };
-
-  const getValue = (label) => {
-    // รองรับตัวเลขทศนิยม ไม่มีเว้นวรรค และหน่วยภาษาไทย เช่น 1.03พัน, 2.5หมื่น
-    const regex = new RegExp(`${label}[:\\s]+([\\d,\\.]+)\\s*(พัน|หมื่น|แสน|ล้าน)?`);
-    const match = cleanText.match(regex);
-    if (!match) return '';
-    let num = parseFloat(match[1].replace(/,/g, ''));
-    const unit = match[2] || '';
-    if (unit === 'พัน') num = num * 1000;
-    else if (unit === 'หมื่น') num = num * 10000;
-    else if (unit === 'แสน') num = num * 100000;
-    else if (unit === 'ล้าน') num = num * 1000000;
-    // ถ้าเป็นจำนวนเต็ม ไม่ต้องมีทศนิยม
-    return Number.isInteger(num) ? String(num) : String(Math.round(num * 100) / 100);
-  };
-
-  // ดึงชื่อผู้รายงาน รองรับชื่อที่มีวรรคและหลายบรรทัด เช่น (ฟาตี\nเมาะห์) → ฟาตีเมาะห์
-  const getReporter = (str) => {
-    // ดึงข้อความในวงเล็บ รองรับ newline ด้วย
-    const m = str.match(/\(([^)]+)\)/s);
-    if (!m) return '';
-    // ลบ newline และเว้นวรรคพิเศษออก
-    return m[1].replace(/\s+/g, '');
-  };
-
-  // Header fields
-  let channelName = '', liveDate = '', sessionId = '';
-  if (hasHeader) {
-    channelName = getTextValue('ชื่อช่อง');
-    const liveDateRaw = getTextValue('วันที่ไลฟ์') || getTextValue('ขึ้นไลฟ์วันเวลา');
-    const startTime = getTextValue('เวลาเริ่มไลฟ์') || '';
-    liveDate = startTime ? `${liveDateRaw} ${startTime}` : liveDateRaw;
-    sessionId = getTextValue('Session ID') || getTextValue('Session id');
-  }
-
-  // ดึงวันที่จากข้อความ
-  let reportDate = '';
-  const dateMatch = cleanText.match(/วันที่สรุปผล[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/) ||
-                    cleanText.match(/วันที่ไลฟ์[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/) ||
-                    cleanText.match(/\((\d{1,2}\/\d{2}\/\d{4})\)/);
-  if (dateMatch) reportDate = dateMatch[1];
-
-  // Hourly fields
-  let reportTime = '', reporter = '';
-  let sales = '', orders = '', cartAdds = '', adCost = '', roas = '';
-
-  if (hasHourly) {
-    // รองรับทั้งรูปแบบเก่า (เวลา + ชื่อในวงเล็บ) และรูปแบบใหม่ (แยกบรรทัด)
-    const newTimeMatch = cleanText.match(/สรุปผล\s*ณ\s*เวลา\s*([\d:]+)\s*น\.?\s*(\([^)]+\))/s);
-    const oldTimeMatch = cleanText.match(/เวลา\s*([\d:]+)\s*(\([^)]+\))/s);
-    const splitTimeMatch = cleanText.match(/สรุปผล\s*ณ\s*เวลา[:\s]*\s*([\d:]+)\s*น\.?/);
-    // รองรับทั้ง ผู้รายงาน: และ นักไลฟ์:
-    const splitReporterMatch = cleanText.match(/(?:ผู้รายงาน|นักไลฟ์)[:\s]+(.+)/);
-
-    if (newTimeMatch) {
-      reportTime = normalizeTime(newTimeMatch[1]);
-      reporter = getReporter(newTimeMatch[2]);
-    } else if (oldTimeMatch) {
-      reportTime = normalizeTime(oldTimeMatch[1]);
-      reporter = getReporter(oldTimeMatch[2]);
-    } else if (splitTimeMatch) {
-      reportTime = normalizeTime(splitTimeMatch[1]);
-      // ลบ emoji และ whitespace ออกจากชื่อ
-      reporter = splitReporterMatch
-        ? splitReporterMatch[1].trim().replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27FF}]|\uFE0F|\u200D/gu, '').trim()
-        : '';
-    }
-
-    sales = getValue('ยอดขายรวม');
-    orders = getValue('คำสั่งซื้อรวม');
-    cartAdds = getValue('เพิ่มลงรถเข็น') || getValue('เพิ่มเข้ารถเข็นรวม');
-    adCost = getValue('ค่าโฆษณารวม');
-    const roasMatch = cleanText.match(/ROAS[:\s]+([\d.]+)/) || cleanText.match(/ROAS\)\s*([\d.]+)/);
-    roas = roasMatch ? roasMatch[1] : '';
-  }
-
-  // ดึง %ค่าโฆษณา
-  let adPercent = '';
-  const adPercentMatch = cleanText.match(/%ค่าโฆษณา[:\s]+([\d.]+)%?/);
-  if (adPercentMatch) adPercent = adPercentMatch[1];
-
-  // ดึงคอยน์ที่กำลังแจก
-  let currentCoin = '';
-  const currentCoinMatch = cleanText.match(/คอยน์ที่กำลังแจก[:\s]+งบ\s*([\d.]+)\s*ขนาด\s*([\d.]+)/);
-  if (currentCoinMatch) currentCoin = `งบ ${currentCoinMatch[1]} บาท ขนาด ${currentCoinMatch[2]}`;
-
-  return {
-    hasHeader, hasHourly,
-    channelName, liveDate, sessionId,
-    reportTime, reporter, sales, orders, cartAdds, adCost, roas,
-    reportDate, adPercent, currentCoin,
-  };
+body {
+  font-family: 'Sarabun', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
 }
 
-// ฟังก์ชันดึง Sheets client
-async function getSheetsClient() {
-  const auth = new google.auth.GoogleAuth({
-    credentials: GOOGLE_CREDENTIALS,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-  return google.sheets({ version: 'v4', auth });
+/* ---- TOP BAR ---- */
+.topbar {
+  background: var(--orange);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(238,77,45,0.3);
+}
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Prompt', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+.shopee-icon {
+  width: 30px; height: 30px;
+  background: #fff;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.shopee-icon img { width: 100%; height: 100%; object-fit: cover; }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.85);
+}
+.topbar-badge {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #fff;
 }
 
-// ลบ apostrophe นำหน้าวันที่ที่ Sheets อาจส่งกลับมา
-function cleanDate(val) {
-  if (!val) return '';
-  return String(val).replace(/^'+/, '').trim();
+/* ---- LAYOUT ---- */
+.layout { display: flex; min-height: calc(100vh - 56px); }
+
+/* ---- SIDEBAR ---- */
+.sidebar {
+  width: 220px;
+  background: var(--white);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+.sidebar-section {
+  padding: 0 14px;
+  margin-bottom: 8px;
+}
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 6px 4px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text2);
+  font-weight: 400;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.nav-item:hover { background: var(--orange-pale); color: var(--orange); }
+.nav-item.active {
+  background: var(--orange-pale);
+  color: var(--orange);
+  font-weight: 600;
+}
+.nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+/* ---- MAIN CONTENT ---- */
+.main {
+  flex: 1;
+  padding: 24px;
+  overflow-x: hidden;
 }
 
-// ฟังก์ชันดึงข้อมูลทั้งหมด
-async function getAllRows() {
-  const sheets = await getSheetsClient();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: 'น้องจดจิ!A:P',
-  });
-  const rows = response.data.values || [];
-  // clean apostrophe จาก column A (วันที่) และ column E (วันที่ขึ้นไลฟ์) ทุกแถว
-  return rows.map(r => {
-    if (r[0]) r[0] = cleanDate(r[0]);
-    if (r[4]) r[4] = cleanDate(r[4]);
-    return r;
-  });
+/* ---- PAGE HEADER ---- */
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-title { font-family: 'Prompt', sans-serif; font-weight: 700; font-size: 22px; color: var(--dark); }
+.page-sub { font-size: 13px; color: var(--text3); margin-top: 2px; }
+
+.controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.select-styled {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 13px;
+  color: var(--text2);
+  background: var(--white);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A06050' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.select-styled:focus { border-color: var(--orange); }
+
+.btn-primary {
+  background: var(--orange);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary:hover { background: var(--orange-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(238,77,45,0.3); }
+
+/* ---- PAGE SECTIONS ---- */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ---- KPI STRIP ---- */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+.kpi-card:hover { box-shadow: var(--shadow-hover); }
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--orange);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.kpi-card.green::before { background: var(--green); }
+.kpi-card.gold::before { background: var(--gold); }
+.kpi-card.gray::before { background: var(--gray); }
+.kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.kpi-value {
+  font-family: 'Prompt', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.1;
+}
+.kpi-change {
+  font-size: 12px;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.up { color: var(--green); }
+.down { color: var(--red); }
+.neutral { color: var(--gray); }
+.kpi-emoji { font-size: 24px; position: absolute; right: 14px; top: 14px; opacity: 0.18; }
+
+/* ---- CHART CARDS ---- */
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.chart-grid.single { grid-template-columns: 1fr; }
+.chart-grid.three { grid-template-columns: 2fr 1fr; }
+.chart-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s;
+}
+.chart-card:hover { box-shadow: var(--shadow-hover); }
+.chart-card.full { grid-column: 1 / -1; }
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-title { font-family: 'Prompt', sans-serif; font-size: 15px; font-weight: 600; color: var(--dark); }
+.card-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.chart-wrap { position: relative; }
+
+/* ---- LEGEND ---- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+/* ---- INSIGHT CARDS ---- */
+.insight-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.insight-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.insight-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.insight-icon.orange { background: var(--orange-pale); }
+.insight-icon.green { background: var(--green-bg); }
+.insight-icon.gold { background: var(--gold-bg); }
+.insight-icon.red { background: var(--red-bg); }
+.insight-text .label { font-size: 12px; color: var(--text3); margin-bottom: 3px; }
+.insight-text .value { font-family: 'Prompt', sans-serif; font-size: 16px; font-weight: 600; color: var(--dark); }
+.insight-text .desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+
+/* ---- TABLE ---- */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text3);
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 2px solid var(--border);
+  background: var(--orange-pale);
+}
+.data-table td {
+  padding: 11px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.data-table tr:hover td { background: var(--orange-pale); }
+.rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  font-size: 11px; font-weight: 700;
+}
+.rank-1 { background: #FFD700; color: #7A5000; }
+.rank-2 { background: #C0C0C0; color: #444; }
+.rank-3 { background: #CD7F32; color: #fff; }
+.rank-n { background: var(--gray-bg); color: var(--gray); }
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tag-orange { background: var(--orange-pale); color: var(--orange); }
+.tag-green { background: var(--green-bg); color: var(--green); }
+.tag-gold { background: var(--gold-bg); color: var(--gold); }
+.tag-red { background: var(--red-bg); color: var(--red); }
+.tag-gray { background: var(--gray-bg); color: var(--gray); }
+
+/* ---- PROGRESS BAR ---- */
+.pbar-wrap { background: var(--orange-pale); border-radius: 4px; height: 6px; margin-top: 4px; }
+.pbar { height: 100%; border-radius: 4px; background: var(--orange); }
+.pbar.green { background: var(--green); }
+
+/* ---- HEATMAP ---- */
+.heatmap-wrap { overflow-x: auto; }
+.heatmap { border-collapse: collapse; font-size: 11px; width: 100%; }
+.heatmap th { padding: 4px 6px; color: var(--text3); font-weight: 600; text-align: center; font-size: 10px; }
+.heatmap td {
+  width: 34px; height: 30px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  margin: 1px;
+  cursor: default;
+  transition: transform 0.1s;
+}
+.heatmap td:hover { transform: scale(1.15); z-index: 2; position: relative; }
+.hm-label { font-weight: 700; color: var(--text2); background: none !important; }
+
+/* ---- MoM COMPARISON ---- */
+.mom-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.mom-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.mom-month { font-size: 12px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+.mom-main { font-family: 'Prompt', sans-serif; font-size: 28px; font-weight: 700; color: var(--dark); }
+.mom-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.mom-change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+.mom-card.current { border: 2px solid var(--orange); }
+.mom-card.current .mom-month { color: var(--orange); }
+
+/* ---- UPLOAD AREA ---- */
+.upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--orange-pale);
+  margin-bottom: 20px;
+}
+.upload-area:hover { border-color: var(--orange); background: var(--orange-mid); }
+.upload-icon { font-size: 40px; margin-bottom: 12px; }
+.upload-title { font-family: 'Prompt', sans-serif; font-size: 16px; font-weight: 600; color: var(--dark); margin-bottom: 6px; }
+.upload-sub { font-size: 13px; color: var(--text3); }
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { padding: 16px; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .mom-grid { grid-template-columns: 1fr; }
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
 }
 
-// คอลัมน์: A=0วันที่ B=1เวลา C=2ผู้รายงาน D=3ชื่อช่อง E=4วันที่ขึ้นไลฟ์ F=5SessionID G=6ยอดขาย H=7คำสั่งซื้อ I=8รถเข็น J=9ค่าโฆษณา K=10ROAS L=11ยอดขายเพิ่ม M=12ออเดอร์เพิ่ม N=13รถเข็นเพิ่ม O=14แอดกินต่อชั่วโมง
-
-const SETTINGS_SHEET = 'ตั้งค่า';
-
-// สร้าง Sheet ตั้งค่า ถ้ายังไม่มี
-async function ensureSettingsSheet(sheets) {
-  try {
-    await sheets.spreadsheets.values.get({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${SETTINGS_SHEET}!A1`,
-    });
-  } catch {
-    // Sheet ยังไม่มี → สร้างใหม่
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      resource: {
-        requests: [{ addSheet: { properties: { title: SETTINGS_SHEET } } }]
-      }
-    });
-    // ใส่ header (default Tier = C)
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${SETTINGS_SHEET}!A1:B5`,
-      valueInputOption: 'USER_ENTERED',
-      resource: {
-        values: [
-          ['ตั้งค่า', 'ค่า'],
-          ['คอยน์งบ', ''],
-          ['คอยน์ขนาด', ''],
-          ['Tier', 'C'],
-          ['อัปเดตล่าสุด', ''],
-        ]
-      }
-    });
-  }
+/* ---- ANIMATIONS ---- */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+.page.active > * { animation: fadeUp 0.3s ease both; }
+.page.active > *:nth-child(1) { animation-delay: 0s; }
+.page.active > *:nth-child(2) { animation-delay: 0.05s; }
+.page.active > *:nth-child(3) { animation-delay: 0.1s; }
+.page.active > *:nth-child(4) { animation-delay: 0.15s; }
+.page.active > *:nth-child(5) { animation-delay: 0.2s; }
 
-// ดึงข้อมูลตั้งค่าคอยน์
-async function getCoinSettings() {
-  try {
-    const sheets = await getSheetsClient();
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${SETTINGS_SHEET}!A1:B5`,
-    });
-    const rows = res.data.values || [];
-    let budget = '', size = '', updated = '';
-    for (const r of rows) {
-      if (r[0] === 'คอยน์งบ') budget = r[1] || '';
-      if (r[0] === 'คอยน์ขนาด') size = r[1] || '';
-      if (r[0] === 'อัปเดตล่าสุด') updated = r[1] || '';
-    }
-    return { budget, size, updated };
-  } catch {
-    return { budget: '', size: '', updated: '' };
-  }
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text3);
 }
-
-// บันทึกตั้งค่าคอยน์
-async function saveCoinSettings(budget, size) {
-  const sheets = await getSheetsClient();
-  await ensureSettingsSheet(sheets);
-  const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-  // ดึง Tier เดิมไว้ก่อน เพื่อไม่ทับ
-  const current = await getAdTier();
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SETTINGS_SHEET}!A1:B5`,
-    valueInputOption: 'USER_ENTERED',
-    resource: {
-      values: [
-        ['ตั้งค่า', 'ค่า'],
-        ['คอยน์งบ', budget],
-        ['คอยน์ขนาด', size],
-        ['Tier', current],
-        ['อัปเดตล่าสุด', now],
-      ]
-    }
-  });
-}
-
-// ดึง Tier ปัจจุบัน (default = C)
-async function getAdTier() {
-  try {
-    const sheets = await getSheetsClient();
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: GOOGLE_SHEET_ID,
-      range: `${SETTINGS_SHEET}!A1:B5`,
-    });
-    const rows = res.data.values || [];
-    for (const r of rows) {
-      if (r[0] === 'Tier' && r[1]) return r[1].toUpperCase();
-    }
-    return 'C';
-  } catch {
-    return 'C';
-  }
-}
-
-// บันทึก Tier ใหม่ (เก็บคอยน์เดิมไว้)
-async function saveAdTier(tier) {
-  const sheets = await getSheetsClient();
-  await ensureSettingsSheet(sheets);
-  const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-  const coin = await getCoinSettings();
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: `${SETTINGS_SHEET}!A1:B5`,
-    valueInputOption: 'USER_ENTERED',
-    resource: {
-      values: [
-        ['ตั้งค่า', 'ค่า'],
-        ['คอยน์งบ', coin.budget],
-        ['คอยน์ขนาด', coin.size],
-        ['Tier', tier],
-        ['อัปเดตล่าสุด', now],
-      ]
-    }
-  });
-}
-
-// คำนวณเพดานค่าแอดตามช่วงเวลาและ Tier
-function getAdCeiling(timeNum, tier) {
-  if (tier === 'B') {
-    if (timeNum >= 480 && timeNum <= 1198) return 150;       // 08:00-19:58
-    if (timeNum >= 1200 && timeNum <= 1438) return 300;      // 20:00-23:58
-    if (timeNum >= 1 && timeNum <= 120) return 300;          // 00:01-02:00
-    if (timeNum >= 121 && timeNum <= 478) return 100;        // 02:01-07:58
-  } else if (tier === 'C' || tier === 'D') {
-    if (timeNum >= 480 && timeNum <= 1198) return 100;       // 08:00-19:58 ทุก 15 นาที
-    if (timeNum >= 1200 && timeNum <= 1438) return 100;      // 20:00-23:58 ทุก 15 นาที
-    if (timeNum >= 1 && timeNum <= 120) return 100;          // 00:01-02:00 ทุก 15 นาที
-    if (timeNum >= 121 && timeNum <= 478) return 50;         // 02:01-07:58 ทุก 30 นาที
-  }
-  return null;
-}
-
-// แปลงวันที่ DD/MM/YYYY เป็น Date serial สำหรับ Sheets (ส่งเป็น YYYY-MM-DD)
-function toSheetsDate(dateStr) {
-  const d = cleanDate(dateStr);
-  if (!d) return '';
-  const parts = d.split('/');
-  if (parts.length < 3) return d;
-  const [dd, mm, yyyy] = parts;
-  // ส่งเป็น YYYY-MM-DD ให้ Sheets แปลงเป็น Date จริงๆ
-  return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
-}
-
-// ฟังก์ชันบันทึกแถวใหม่ (เช็ค duplicate ก่อน)
-async function appendToSheet(data) {
-  const sheets = await getSheetsClient();
-  const today = data.reportDate || new Date().toLocaleDateString('th-TH');
-  const todayForSheets = toSheetsDate(today);
-  const liveDateForSheets = data.liveDate ? toSheetsDate(data.liveDate.split(' ')[0]) + (data.liveDate.includes(' ') ? ' ' + data.liveDate.split(' ').slice(1).join(' ') : '') : '';
-
-  const row = [
-    todayForSheets,
-    data.reportTime || '',
-    data.reporter || '',
-    data.channelName || '',
-    data.liveDate || '',
-    data.sessionId || '',
-    data.sales || '',
-    data.orders || '',
-    data.cartAdds || '',
-    data.adCost || '',
-    data.roas || '',
-  ];
-
-  // เช็คว่ามีข้อมูลซ้ำไหม โดยใช้ session+เวลา+ผู้รายงาน หรือ วันที่+เวลา+ผู้รายงาน
-  if (data.hasHourly && data.reportTime) {
-    const rows = await getAllRows();
-    const today = data.reportDate || new Date().toLocaleDateString('th-TH');
-    let dupRowIndex = -1;
-
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const rowTime = normalizeTime(rows[i][1]);
-      const rowReporter = rows[i][2] || '';
-      const rowDate = cleanDate(rows[i][0] || '');
-      const rowSession = rows[i][5] || '';
-
-      // เช็คด้วย session + วันที่ + เวลา + ผู้รายงาน (กรณีมี sessionId)
-      const matchBySession = data.sessionId &&
-        rowSession === data.sessionId &&
-        rowDate === today &&
-        rowTime === normalizeTime(data.reportTime) &&
-        rowReporter === data.reporter;
-
-      // เช็คด้วย วันที่ + เวลา + ผู้รายงาน (กรณีไม่มี sessionId)
-      const matchByDate = !data.sessionId &&
-        rowDate === today &&
-        rowTime === normalizeTime(data.reportTime) &&
-        rowReporter === data.reporter;
-
-      if (matchBySession || matchByDate) {
-        dupRowIndex = i + 1;
-        break;
-      }
-    }
-
-    // ถ้าเจอแถวซ้ำ → เตือนแล้วไม่บันทึกทับ (ต้องพิมพ์ แก้ไข นำหน้าถึงจะทับได้)
-    if (dupRowIndex !== -1) {
-      return 'duplicate';
-    }
-  }
-
-  // ไม่มีซ้ำ → append ปกติ
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: 'น้องจดจิ!A:K',
-    valueInputOption: 'USER_ENTERED',
-    resource: { values: [row] },
-  });
-  return 'appended';
-}
-
-// ฟังก์ชันดึงแถวก่อนหน้าของ session เดียวกัน (เพื่อคำนวณยอดเพิ่ม)
-async function getPrevRowSameSession(sessionId, currentTime, rows) {
-  if (!sessionId) return null;
-  const normCurrent = normalizeTime(currentTime);
-
-  const sessionRows = rows.filter(r =>
-    r[5] === sessionId &&
-    r[1] && r[1] !== '' &&
-    r[6] !== undefined && r[6] !== '' &&
-    normalizeTime(r[1]) < normCurrent
-  );
-
-  if (sessionRows.length === 0) return null;
-  sessionRows.sort((a, b) => normalizeTime(a[1]).localeCompare(normalizeTime(b[1])));
-  return sessionRows[sessionRows.length - 1];
-}
-
-// คำนวณยอดเพิ่มต่อชั่วโมง
-function calcDiff(currentSales, prevRow) {
-  if (!prevRow || prevRow[6] === undefined || prevRow[6] === '') return null;
-  const current = parseFloat(String(currentSales).replace(/,/g, '') || 0);
-  const prev = parseFloat(String(prevRow[6]).replace(/,/g, '') || 0);
-  if (isNaN(current) || isNaN(prev)) return null;
-  return current - prev;
-}
-
-// ฟังก์ชันแก้ไขข้อมูล
-async function editInSheet(data) {
-  const sheets = await getSheetsClient();
-  const rows = await getAllRows();
-
-  const targetTime = normalizeTime(data.reportTime);
-
-  let targetRowIndex = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const rowTime = normalizeTime(rows[i][1]);
-    const rowReporter = rows[i][2] || '';
-    const rowSession = rows[i][5] || '';
-    const rowDate = cleanDate(rows[i][0] || '');
-
-    // ถ้ามี sessionId → ต้องตรง session + วันที่ + เวลา + ชื่อ
-    // ถ้าไม่มี reportDate → ข้ามเช็ควันที่ (เช็คแค่ session + เวลา + ชื่อ)
-    const cleanReportDate = cleanDate(data.reportDate || '');
-    const matchBySession = data.sessionId &&
-      rowSession === data.sessionId &&
-      (cleanReportDate === '' || rowDate === cleanReportDate) &&
-      rowTime === targetTime &&
-      rowReporter === data.reporter;
-
-    // ถ้าไม่มี sessionId → ใช้ วันที่ + เวลา + ชื่อ
-    const matchByDate = !data.sessionId &&
-      rowDate === (data.reportDate || '') &&
-      rowTime === targetTime &&
-      rowReporter === data.reporter;
-
-    if (matchBySession || matchByDate) {
-      targetRowIndex = i + 1;
-      break;
-    }
-  }
-
-  if (targetRowIndex === -1) {
-    await appendToSheet(data);
-    return { result: 'new', rows };
-  }
-
-  const existingRow = rows[targetRowIndex - 1];
-  const dateVal = data.reportDate || cleanDate(existingRow[0] || '') || new Date().toLocaleDateString('th-TH');
-  const newRow = [
-    toSheetsDate(dateVal),
-    data.reportTime || existingRow[1] || '',
-    data.reporter || existingRow[2] || '',
-    data.channelName || existingRow[3] || '',
-    data.liveDate || existingRow[4] || '',
-    data.sessionId || existingRow[5] || '',
-    data.sales || existingRow[6] || '',
-    data.orders || existingRow[7] || '',
-    data.cartAdds || existingRow[8] || '',
-    data.adCost || existingRow[9] || '',
-    data.roas || existingRow[10] || '',
-  ];
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: `น้องจดจิ!A${targetRowIndex}:K${targetRowIndex}`,
-    valueInputOption: 'USER_ENTERED',
-    resource: { values: [newRow] },
-  });
-
-  return { result: 'edited', rows, sessionId: existingRow[5] };
-}
-
-// ฟังก์ชันสรุปตาม Session ID
-async function getSummaryBySession(sessionId) {
-  const rows = await getAllRows();
-
-  const sessionRows = rows.filter(r =>
-    r[5] === sessionId && r[1] && r[1] !== '' && r[6] !== undefined && r[6] !== ''
-  );
-
-  if (sessionRows.length === 0) {
-    return `🔍 จดจิหาข้อมูล Session ${sessionId} ไม่เจอเลยนะครับ ลองเช็ค Session ID อีกทีได้เลยครับ 🙏`;
-  }
-
-  // ฟังก์ชันแปลงวันที่ไทย DD/MM/YYYY เป็น timestamp เพื่อเรียงลำดับ
-  const dateToTs = (dateStr, timeStr = '00:00') => {
-    const d = cleanDate(dateStr);
-    if (!d) return 0;
-    const parts = d.split('/');
-    if (parts.length < 3) return 0;
-    const [dd, mo, y] = parts.map(Number);
-    const [h, m] = (timeStr || '00:00').split(':').map(Number);
-    return new Date(y, mo - 1, dd, h, m || 0).getTime();
-  };
-
-  // เรียงตามวันที่+เวลา โดยแปลงเป็น timestamp ก่อน
-  sessionRows.sort((a, b) => {
-    const tsA = dateToTs(a[0], normalizeTime(a[1]));
-    const tsB = dateToTs(b[0], normalizeTime(b[1]));
-    return tsA - tsB;
-  });
-
-  const lastRow = sessionRows[sessionRows.length - 1];
-  const firstRow = sessionRows[0];
-
-  // ดึงเวลาเริ่มไลฟ์จาก column E
-  const liveDateRaw = firstRow[4] || '';
-  const liveTimeMatch = liveDateRaw.match(/(\d{1,2}[:.]\d{2})/);
-  const liveDateMatch = liveDateRaw.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-  const liveTimeStr = liveTimeMatch ? liveTimeMatch[1].replace('.', ':') : '';
-  const liveDateStr = liveDateMatch ? liveDateMatch[1] : '';
-
-  // วันที่รายงานล่าสุด
-  const lastReportTime = normalizeTime(lastRow[1]);
-  const lastReportDate = lastRow[0] || '';
-
-  // คำนวณชั่วโมงไลฟ์
-  const parseDateTime = (dateStr, timeStr) => {
-    const cleaned = cleanDate(dateStr);
-    if (!cleaned || !timeStr) return null;
-    const parts = cleaned.split('/');
-    if (parts.length < 3) return null;
-    const [d, mo, y] = parts.map(Number);
-    const [h, m] = timeStr.split(':').map(Number);
-    return new Date(y, mo - 1, d, h, m || 0);
-  };
-
-  const startDT = parseDateTime(liveDateStr, liveTimeStr);
-  const endDT = parseDateTime(lastReportDate, lastReportTime);
-
-  let hoursLabel = '-';
-  let totalHours = 0;
-  if (startDT && endDT && endDT > startDT) {
-    const diffMs = endDT - startDT;
-    const diffMinutes = Math.floor(diffMs / 60000);
-    const hours = Math.floor(diffMinutes / 60);
-    const minutes = diffMinutes % 60;
-    totalHours = diffMinutes / 60;
-    hoursLabel = hours > 0
-      ? `${hours} ชม.${minutes > 0 ? ` ${minutes} นาที` : ''}`
-      : `${minutes} นาที`;
-  }
-
-  // ยอดขายรวม / คำสั่งซื้อ / รถเข็น → จากแถวล่าสุด
-  const totalSales = parseFloat(String(lastRow[6] || '0').replace(/,/g, '')) || 0;
-  const totalOrders = lastRow[7] || '-';
-  const totalCart = lastRow[8] || '-';
-  const salesPerHour = totalHours > 0 ? Math.round(totalSales / totalHours) : totalSales;
-
-  // ค่าโฆษณารวม → บวกแถวสุดท้ายของแต่ละวันใน Session
-  // ค่าโฆษณารวม → บวก column O (แอดกินต่อชั่วโมง) ทุกแถวของ Session นี้
-  let totalAd = 0;
-  for (const r of sessionRows) {
-    const hourlyAd = parseFloat(String(r[15] || '0').replace(/,/g, '')) || 0;
-    totalAd += hourlyAd;
-  }
-  totalAd = Math.round(totalAd * 100) / 100;
-  const roas = totalAd > 0 ? (totalSales / totalAd).toFixed(2) : '-';
-
-  return [
-    `📊 จดจิสรุปมาให้แล้วนะครับ~`,
-    `━━━━━━━━━━━━━━`,
-    `📺 ช่อง: ${firstRow[3] || '-'}`,
-    `💡 Session: ${sessionId}`,
-    `🗓 เริ่มไลฟ์: ${liveDateStr} เวลา ${liveTimeStr || '-'}`,
-    `🕐 รายงานล่าสุด: ${lastReportDate} เวลา ${lastReportTime}`,
-    `⏱ ไลฟ์ทั้งหมด: ${hoursLabel}`,
-    `━━━━━━━━━━━━━━`,
-    `💰 ยอดขายรวม: ${Number(totalSales).toLocaleString()} บาท`,
-    `📦 คำสั่งซื้อ: ${totalOrders} ออเดอร์`,
-    `🛒 รถเข็น: ${totalCart} ชิ้น`,
-    `💡 ยอดต่อชั่วโมง: ${Number(salesPerHour).toLocaleString()} บาท/ชม.`,
-    `━━━━━━━━━━━━━━`,
-    `📢 ค่าโฆษณารวม: ${Number(totalAd).toLocaleString()} บาท`,
-    `📈 ROAS: ${roas}`,
-    `━━━━━━━━━━━━━━`,
-    `จดจิคิดมาให้แล้วนะครับ หวังว่าจะเป็นประโยชน์นะครับ 🌸`,
-  ].join('\n');
-}
-
-// ฟังก์ชันตรวจสอบความผิดปกติของข้อมูล
-async function validateData(parsed, prevRow) {
-  const warnings = [];
-
-  if (parsed.hasHourly) {
-    const sales = parseFloat(String(parsed.sales || '0').replace(/,/g, ''));
-    const adCost = parseFloat(String(parsed.adCost || '0').replace(/,/g, ''));
-    const roas = parseFloat(parsed.roas || 0);
-    const reportHour = parseInt((parsed.reportTime || '0').split(':')[0]);
-
-    // 1. เช็คยอดขายลดลงจากชั่วโมงก่อน
-    if (prevRow && prevRow[6]) {
-      const prevSales = parseFloat(String(prevRow[6] || '0').replace(/,/g, ''));
-      if (sales < prevSales) {
-        warnings.push(`🔔 จดจิสังเกตว่ายอดขายลดลงนะครับ (${Number(prevSales).toLocaleString()} → ${Number(sales).toLocaleString()} บาท) ยอดสะสมไม่ควรลดครับ ดูตัวเลขอีกทีได้เลยนะครับ`);
-      }
-
-      // เช็คออเดอร์ลดลง
-      if (prevRow[7]) {
-        const prevOrders = parseFloat(String(prevRow[7] || '0').replace(/,/g, ''));
-        const orders = parseFloat(String(parsed.orders || '0').replace(/,/g, ''));
-        if (orders < prevOrders) {
-          warnings.push(`🔔 จดจิสังเกตว่าคำสั่งซื้อลดลงนะครับ (${prevOrders} → ${orders} ออเดอร์) ยอดสะสมไม่ควรลดครับ ดูตัวเลขอีกทีได้เลยนะครับ`);
-        }
-      }
-
-      // 2. เช็คยอดเพิ่มผิดปกติ
-      const diff = sales - prevSales;
-      if (diff > 500000) {
-        warnings.push(`🔔 จดจิสังเกตว่ายอดขายเพิ่มขึ้นเยอะมากผิดปกติเลยนะครับ (+${Number(diff).toLocaleString()} บาท) อาจพิมพ์ทศนิยมผิดครับ ดูตัวเลขอีกทีได้เลยนะครับ`);
-      }
-
-      // 3. เช็คค่าแอดเพิ่มเกิน 125 บาท/ชม. (ตลอด 24 ชั่วโมง)
-      if (prevRow[9] !== undefined && prevRow[9] !== '') {
-        const prevAd = parseFloat(String(prevRow[9] || '0').replace(/,/g, ''));
-        const adDiff = adCost - prevAd;
-        if (adDiff > 125) {
-          warnings.push(`🔔 ชั่วโมงนี้ค่าแอดเพิ่มขึ้น ${Number(adDiff).toLocaleString()} บาทนะครับ เช็คหน่อยนะครับว่าเป็นปกติหรือโปรแกรมแอดรวน 🙏`);
-        }
-      }
-    }
-
-    // 4. เช็ค ROAS ผิดปกติ
-    if (roas > 1000) {
-      warnings.push(`🔔 จดจิสังเกตว่า ROAS ${roas} สูงมากผิดปกติเลยนะครับ ดูตัวเลขอีกทีได้เลยนะครับ`);
-    }
-    if (roas > 0 && roas < 0.1) {
-      warnings.push(`🔔 จดจิสังเกตว่า ROAS ${roas} ต่ำมากผิดปกติเลยนะครับ ดูตัวเลขอีกทีได้เลยนะครับ`);
-    }
-  }
-
-  // 5. เช็ควันที่สรุปผลก่อนวันที่ไลฟ์
-  if (parsed.reportDate && parsed.liveDate) {
-    const liveDateMatch = parsed.liveDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    const reportDateMatch = parsed.reportDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (liveDateMatch && reportDateMatch) {
-      const liveD = new Date(liveDateMatch[3], liveDateMatch[2] - 1, liveDateMatch[1]);
-      const reportD = new Date(reportDateMatch[3], reportDateMatch[2] - 1, reportDateMatch[1]);
-      if (reportD < liveD) {
-        warnings.push(`🔔 จดจิสังเกตว่าวันที่สรุปผล (${parsed.reportDate}) อยู่ก่อนวันที่ไลฟ์ (${parsed.liveDate}) นะครับ ดูวันที่อีกทีได้เลยนะครับ`);
-      }
-    }
-  }
-
-  return warnings;
-}
-
-
-async function replyMessage(replyToken, message) {
-  await axios.post('https://api.line.me/v2/bot/message/reply', {
-    replyToken,
-    messages: [{ type: 'text', text: message }],
-  }, {
-    headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
-  });
-}
-
-async function pushMessage(to, message) {
-  await axios.post('https://api.line.me/v2/bot/message/push', {
-    to,
-    messages: [{ type: 'text', text: message }],
-  }, {
-    headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
-  });
-}
-
-// คำคมให้กำลังใจ สุ่ม 30% ของการบันทึก
-const QUOTES = [
-  // คอยน์
-  'อย่าลืมเช็คคอยน์นะครับ ถ้าหมดรีบเติมด่วนเลย 🪙',
-  'คอยน์หมดคนดูออก! เช็คด่วนเลยครับ ⚡',
-  'สังเกตแถบคอยน์ด้วยนะครับ อย่าปล่อยให้หมดโดยไม่รู้ตัว 👀',
-  'คอยน์เหลือน้อยแล้วรึเปล่า? เช็คไว้เลยนะครับ 🔍',
-  'เติมคอยน์ก่อนนะครับ คนดูจะได้อยู่กับเราต่อ 💛',
-  'อย่าลืมดูจำนวนคนดูด้วยนะครับ ถ้าไม่มีคนดูอาจคอยน์หมดแล้ว 📉',
-  // มองกล้อง
-  'มองกล้องบ้างนะครับ อย่าก้มดูจอตลอด คนดูอยากสบตาด้วย 🥹',
-  'เงยหน้ามองกล้องหน่อยนะครับ ลูกค้ารอสบตาอยู่เลย 👁️',
-  'คนไลฟ์อย่าก้มนานเกินไปนะครับ มองกล้องแล้วยิ้มสักที 😊',
-  'สบตาคนดูผ่านกล้องบ้างนะครับ มันสร้างความผูกพันได้มากเลย 💕',
-  'กล้องอยู่ตรงหน้านะครับ มองมาบ้างได้เลย 🎥',
-  'ยิ้มให้กล้องหน่อยนะครับ คนดูรู้สึกได้ว่าพี่พูดกับเขาโดยตรง ✨',
-  // เสียง/ไมค์
-  'เช็คเสียงไมค์ด้วยนะครับ ได้ยินชัดไหม? 🎤',
-  'พูดให้ดังและชัดขึ้นอีกนิดนะครับ มี energy หน่อยได้เลย 🔊',
-  'เสียงยังปกติดีไหมครับ? บางทีไมค์หลุดโดยไม่รู้ตัว 🎙️',
-  'พูดฉะฉานเข้าไว้นะครับ ความมั่นใจทำให้คนดูอยากซื้อ 💪',
-  'ระดับเสียงโอเคไหมครับ? ไม่เบาไปหรือดังไปนะ 🔉',
-  // energy
-  'เติม energy หน่อยนะครับ คนดูชอบนักไลฟ์ที่มีพลัง 🔥',
-  'พูดให้มีจังหวะขึ้นลงบ้างนะครับ อย่าพูดเสียงเดียวตลอด 🎵',
-  'ยิ้มบ้างนะครับ แม้เหนื่อยแค่ไหน คนดูรับพลังจากพี่เสมอ 😄',
-  'กระตือรือร้นขึ้นนิดนึงนะครับ ยอดจะตามมาเองเลย 💥',
-  'อย่าลืมแนะนำสินค้าบ้างนะครับ บางทีคนดูไม่รู้ว่ามีอะไรขาย 🛍️',
-  // คอมเมนต์
-  'อ่านแชตลูกค้าบ้างนะครับ มีคนรอคำตอบอยู่เลย 💬',
-  'เช็คคอมเมนต์ด้วยนะครับ ลูกค้าที่ถามคือคนที่กำลังจะซื้อ 🛒',
-  'ตอบแชตลูกค้าบ้างนะครับ แค่พูดชื่อเขา เขาดีใจมากเลย 🥰',
-  'อ่านชื่อลูกค้าในแชตออกเสียงบ้างนะครับ คนดูจะรู้สึกว่าพี่เห็นเขาอยู่ 👁️',
-  'มีคนถามในแชตไหมครับ? อย่าปล่อยคำถามค้างไว้นานนะ 🗣️',
-  'ตอบเมนต์เยอะๆ นะครับ ยิ่งตอบยิ่งมีคนดูเพิ่ม 📈',
-  // กำลังใจจากจดจิ
-  'จดจิภูมิใจในทีมมากเลยนะครับ วันนี้ทำได้ดีมาก 👑',
-  'จดจิเชียร์อยู่ด้วยนะครับ สู้ๆ ทีมเราเก่งที่สุด 🏆',
-  'จดจิบอกเลยนะครับ ทุกชั่วโมงที่ไลฟ์คือความพยายามที่น่าชื่นชม ⭐',
-  'จดจิขอส่งแรงใจให้ทีมนะครับ เหนื่อยได้แต่อย่าหยุด 💪',
-  'จดจิเห็นความตั้งใจของทีมเสมอนะครับ ขายต่อไปได้เลย 🌸',
-  'จดจิบอกว่าทีมนี้สุดยอดมากเลยนะครับ พรุ่งนี้จะภูมิใจกับวันนี้แน่นอน 🌻',
-];
-
-function getRandomQuote() {
-  if (Math.random() > 0.3) return '';
-  const quote = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-  return `\n\n💬 ${quote}`;
-}
-
-// Webhook endpoint
-app.post('/webhook', async (req, res) => {
-  res.sendStatus(200);
-
-  const events = req.body.events || [];
-  for (const event of events) {
-    if (event.type !== 'message' || event.message.type !== 'text') continue;
-
-    const text = event.message.text.trim();
-    const replyToken = event.replyToken;
-
-    try {
-      // ถ้าขึ้นต้นด้วย /// → เป็นข้อความภายใน จดจิไม่ตอบ ไม่บันทึก
-      if (text.startsWith('///')) continue;
-
-      // คนดู ไม่ต้องทำอะไรกับมัน เป็นแค่ข้อมูลที่พนักงานรายงาน ไม่ใช้คิดหรือเตือน
-      const coinAlert = '';
-
-      // คำสั่ง: ตั้งค่าคอยน์ เช่น "คอยน์ งบ 50 ขนาด 0.16"
-      const coinSetMatch = text.match(/คอยน์\s*งบ\s*([\d.]+)\s*ขนาด\s*([\d.]+)/);
-      if (coinSetMatch) {
-        const budget = coinSetMatch[1];
-        const size = coinSetMatch[2];
-        await saveCoinSettings(budget, size);
-        await replyMessage(replyToken, `✅ จดจิบันทึกตั้งค่าคอยน์แล้วนะครับ 🪙\nงบ ${budget} บาท | ขนาด ${size}\nจะแจ้งพนักงานทุกครั้งที่บันทึกยอดครับ 🌸`);
-        continue;
-      }
-
-      // คำสั่ง: @น้องจดจิ
-      if (text.includes('@น้องจดจิ')) {
-        const responses = [
-          'รับทราบครับ 🫡',
-          'รับเรื่องแล้วครับ ✅',
-          'ได้ครับ รับทราบ 🙏',
-          'โอเคครับ จดจิรับทราบแล้ว 📝',
-          'ครับผม รับทราบเลย 👍',
-          'เข้าใจแล้วครับ จดจิรับเรื่องไว้ 📋',
-          'โอเคครับ จดจิรับรู้แล้ว ✨',
-        ];
-        const reply = responses[Math.floor(Math.random() * responses.length)];
-        await replyMessage(replyToken, reply);
-        continue;
-      }
-
-      // คำสั่ง: สรุป <session id>
-      if (text.startsWith('สรุป')) {
-        const parts = text.split(/\s+/);
-        const sessionId = parts[1] || '';
-        if (!sessionId) {
-      await replyMessage(replyToken, '🌸 บอก Session ID ด้วยนะครับ เช่น: สรุป 24749907 จดจิจะได้สรุปให้ถูกต้องเลยครับ~ 🐾');
-          continue;
-        }
-        const summary = await getSummaryBySession(sessionId);
-        await replyMessage(replyToken, summary);
-        continue;
-      }
-
-      // คำสั่ง: แก้ไข
-      const isEdit = text.startsWith('แก้ไข');
-      const parsed = parseMessage(text);
-      if (!parsed) {
-        // ถ้าพิมพ์แก้ไข แต่ไม่มีข้อมูลถูกต้อง
-        if (isEdit) {
-          await replyMessage(replyToken, `⚠️ จดจิสังเกตว่าพิมพ์ "แก้ไข" นำหน้านะครับ\n\n👉 ถ้าจะรายงานยอดชั่วโมงใหม่ → ไม่ต้องพิมพ์ "แก้ไข" นะครับ ส่งข้อมูลมาตรงๆ ได้เลย\n👉 ถ้าจะแก้ไขยอดชั่วโมงที่บันทึกไปแล้ว → ให้พิมพ์ "แก้ไข" นำหน้าแล้วใส่ข้อมูลที่ถูกต้องครับ 🙏`);
-        }
-        continue;
-      }
-
-      if (isEdit && parsed.hasHourly) {
-        const { result, rows, sessionId } = await editInSheet(parsed);
-
-        // คำนวณยอดเพิ่มหลังแก้ไข
-        const prevRow = await getPrevRowSameSession(
-          parsed.sessionId || sessionId,
-          parsed.reportTime,
-          rows
-        );
-        const diff = calcDiff(parsed.sales, prevRow);
-        const orderDiff = prevRow && prevRow[7] !== undefined && prevRow[7] !== ''
-          ? parseFloat(String(parsed.orders || '0').replace(/,/g, '')) - parseFloat(String(prevRow[7] || '0').replace(/,/g, ''))
-          : null;
-        const warnings = await validateData(parsed, prevRow);
-        const warnText = warnings.length > 0 ? '\n\n' + warnings.join('\n') : '';
-        const diffText = diff !== null
-          ? `\n💰 ยอดขายเพิ่ม ${diff >= 0 ? '+' : ''}${Number(diff).toLocaleString()} บาท`
-          : '';
-        const orderText = orderDiff !== null
-          ? `\n📦 ออเดอร์เพิ่ม ${orderDiff >= 0 ? '+' : ''}${orderDiff} ออเดอร์`
-          : '';
-
-        await replyMessage(replyToken,
-          result === 'edited'
-            ? `✏️ จดจิแก้ไขข้อมูลให้แล้วนะครับ\n📅 ${parsed.reportDate || ''} เวลา ${parsed.reportTime}${diffText}${orderText}${warnText}${getRandomQuote()}`
-            : `📝 จดจิหาข้อมูลเดิมไม่เจอเลยบันทึกใหม่ให้แล้วนะครับ 🌸\n📅 ${parsed.reportDate || ''} เวลา ${parsed.reportTime}${diffText}${orderText}${warnText}${getRandomQuote()}`
-        );
-
-      } else {
-        // ดึง rows ก่อน append เพื่อหา prevRow ก่อนหน้า
-        const rowsBeforeAppend = await getAllRows();
-        const appendResult = await appendToSheet(parsed);
-
-        // ถ้าเจอข้อมูลซ้ำ → เตือนแล้วหยุด ไม่บันทึกทับ
-        if (appendResult === 'duplicate') {
-          await replyMessage(replyToken,
-            `⚠️ จดจิสังเกตว่าเวลา ${parsed.reportTime} วันที่ ${parsed.reportDate || ''} มีบันทึกไปแล้วนะครับ\n\n👉 ถ้าพิมพ์เวลาผิด → แก้เวลาให้ถูก แล้วส่งใหม่ได้เลยครับ ไม่ต้องพิมพ์ "แก้ไข" นำหน้า\n👉 ถ้าต้องการแก้ไขยอดของเวลา ${parsed.reportTime} → พิมพ์ "แก้ไข" นำหน้าข้อมูลที่ถูกต้องนะครับ 🙏`
-          );
-          continue;
-        }
-
-        let replyText = `📝 จดจิบันทึกให้แล้วนะครับ 🌸`;
-
-        if (parsed.hasHourly) {
-          // ถ้าไม่มี sessionId ใน parsed → หาจาก Sheets โดยใช้เวลา+ผู้รายงาน
-          let sessionId = parsed.sessionId;
-          if (!sessionId && parsed.reportTime && parsed.reporter) {
-            const found = rowsBeforeAppend.slice().reverse().find(r =>
-              normalizeTime(r[1]) === normalizeTime(parsed.reportTime) &&
-              r[2] === parsed.reporter && r[5]
-            ) || rowsBeforeAppend.slice().reverse().find(r => r[5]);
-            sessionId = found ? found[5] : '';
-          }
-
-          const prevRow = await getPrevRowSameSession(
-            sessionId,
-            parsed.reportTime,
-            rowsBeforeAppend.filter(r =>
-              !(normalizeTime(r[1]) === normalizeTime(parsed.reportTime) &&
-                r[2] === parsed.reporter &&
-                (r[5] === sessionId || r[0] === (parsed.reportDate || '')))
-            )
-          );
-          const diff = calcDiff(parsed.sales, prevRow);
-          const orderDiff = prevRow && prevRow[7] !== undefined && prevRow[7] !== ''
-            ? parseFloat(String(parsed.orders || '0').replace(/,/g, '')) - parseFloat(String(prevRow[7] || '0').replace(/,/g, ''))
-            : null;
-          const warnings = await validateData(parsed, prevRow);
-          const warnText = warnings.length > 0 ? '\n\n' + warnings.join('\n') : '';
-
-          // คำนวณยอดเฉลี่ยต่อชั่วโมงของ Session นี้
-          let salesPerHourText = '';
-          if (sessionId && parsed.reportDate && parsed.reportTime) {
-            // หา session rows ทั้งหมดจาก rowsBeforeAppend
-            const sessionRows = rowsBeforeAppend.filter(r => r[5] === sessionId && r[6]);
-            if (sessionRows.length > 0) {
-              // หาแถวแรกของ session เพื่อดึงเวลาเริ่มไลฟ์
-              const firstSessionRow = sessionRows[0];
-              const liveDateRaw = firstSessionRow[4] || '';
-              const liveTimeMatch = liveDateRaw.match(/(\d{1,2}[:.]\d{2})/);
-              const liveDateMatch = liveDateRaw.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-              if (liveTimeMatch && liveDateMatch) {
-                const liveTimeStr = liveTimeMatch[1].replace('.', ':');
-                const liveDateStr = liveDateMatch[1];
-                const parseDateTime = (dateStr, timeStr) => {
-                  const cleaned = cleanDate(String(dateStr || ''));
-                  if (!cleaned || !timeStr) return null;
-                  let d, mo, y;
-                  // รองรับ YYYY-MM-DD (จาก Sheets) และ DD/MM/YYYY (จากพนักงาน)
-                  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-                    [y, mo, d] = cleaned.split('-').map(Number);
-                  } else if (cleaned.includes('/')) {
-                    const parts = cleaned.split('/');
-                    if (parts.length < 3) return null;
-                    [d, mo, y] = parts.map(Number);
-                  } else return null;
-                  const timeParts = normalizeTime(timeStr).split(':').map(Number);
-                  const h = timeParts[0] || 0;
-                  const m = timeParts[1] || 0;
-                  return new Date(y, mo - 1, d, h, m);
-                };
-                const startDT = parseDateTime(liveDateStr, liveTimeStr);
-                const nowDT = parseDateTime(parsed.reportDate, normalizeTime(parsed.reportTime));
-                if (startDT && nowDT && nowDT > startDT) {
-                  const diffMs = nowDT - startDT;
-                  const hours = diffMs / 3600000;
-                  const currentSales = parseFloat(String(parsed.sales || '0').replace(/,/g, ''));
-                  if (hours > 0 && currentSales > 0) {
-                    const rate = Math.round(currentSales / hours);
-                    salesPerHourText = `\n💡 ยอดเฉลี่ย ${Number(rate).toLocaleString()} บาท/ชม.`;
-                  }
-                }
-              }
-            }
-          }
-
-          // %ค่าโฆษณาเตือนถ้าต่ำกว่า 70%
-          const adPercentNum = parseFloat(parsed.adPercent || '100');
-          const adPercentWarn = (parsed.adPercent && adPercentNum < 70)
-            ? `\n\n🔔 %ค่าโฆษณา ${parsed.adPercent}% ต่ำกว่า 70% นะครับ\n👉 รบกวนลดงบโฆษณาลงด้วยนะครับ`
-            : '';
-
-          // คอยน์ที่กำลังแจก ดึงจากรายงาน หรือจากที่ตั้งค่าไว้
-          const coinSettings = await getCoinSettings();
-          const activeCoin = parsed.currentCoin || ((coinSettings.budget && coinSettings.size) ? `งบ ${coinSettings.budget} บาท ขนาด ${coinSettings.size}` : 'งบ [ยังไม่ตั้งค่า] บาท ขนาด [ยังไม่ตั้งค่า]');
-
-          // ข้อความที่ 2: กฎคอยน์ + คำคม (ส่งแยก)
-          const coinRulesMsg = `🚨 ถ้าคนดูเหลือน้อยกว่า 3 คน ให้แจกคอยน์กระตุ้นก่อนนะครับ\n👉 รอบแรก: งบ 10 บาท ขนาด 0.20\n👉 ตามด้วย: ${activeCoin}\n\n⚠️ ถ้าคนดูเกิน 60 คน และคอยน์หมดแล้ว ห้ามแจกเพิ่มก่อนนะครับ${getRandomQuote()}`;
-
-          if (diff !== null) {
-            const orderText = orderDiff !== null ? `\n📦 ออเดอร์เพิ่ม ${orderDiff >= 0 ? '+' : ''}${orderDiff} ออเดอร์` : '';
-            replyText = `📝 จดจิบันทึกให้แล้วนะครับ 🌸\n📅 ${parsed.reportDate || ''} เวลา ${parsed.reportTime}\n💰 ยอดขายเพิ่ม ${diff >= 0 ? '+' : ''}${Number(diff).toLocaleString()} บาท${orderText}${salesPerHourText}${adPercentWarn}${warnText}`;
-          } else {
-            replyText = `📝 จดจิบันทึกให้แล้วนะครับ 🌸\n📅 ${parsed.reportDate || ''} เวลา ${parsed.reportTime}${salesPerHourText}${adPercentWarn}${warnText}`;
-          }
-        }
-
-        // ส่งข้อความที่ 1: สรุปรายงานยอด
-        await replyMessage(replyToken, replyText);
-        // ส่งข้อความที่ 2: กฎคอยน์ + คำคม (push แยก)
-        if (parsed && parsed.hasHourly) {
-          const groupId = event.source.groupId || event.source.userId;
-          await pushMessage(groupId, coinRulesMsg);
-        }
-      }
-
-    } catch (err) {
-      console.error('Error:', err.message);
-      await replyMessage(replyToken, '😢 อุ๊ปส์! จดจิทำอะไรผิดพลาดไปแล้วครับ ลองส่งใหม่อีกทีได้เลยนะครับ 🙏');
-    }
-  }
+.empty-state .emoji { font-size: 40px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-brand">
+    <div class="shopee-icon" id="brandLogo"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAYAAAA5ZDbSAAByKklEQVR42uz9d7id13Xei/5m+cqqu6J3EAQL2JsoSjIBqtqWZckWacdxi+PE55wkT9qJk3uKQZyce5IcO7GTOEXOsWPLjp2QkVVsdckkRVVWsQBsKETbwMauq35tlvvH/PYGKMslcZw49979PHgIAht7rfXNOccc4x3v+w7Bfwdf3nvx6KOPqoMLC1488ID91r9/9YufusoJv7mTtm8dZeMppeR9znnn8RNKyNud914IIbz3V/5MH0WRMJV53Qt/Mk0SWZbmaCOJXhkXxdlut/ui8fHctjvuGF/5WocPH5YHDx6UBx991IkjR9yf9Wcn/iwvKjwsAYS4vKgvvvhirC6dvzGS8i1CiLdIKa8qy/KAECLttpo47zHWEdbSkRcmfFDh8YAQArn+Go4kiVFShT8XAiklWZ7jvS+AM9baM9b7L7VbjUeNjV7cec89y9+62I8++qg78md0scWfwYWVjz76qDx06JBZ+7PTj//ulHHJfd74+72Ub1ZK7mw3GzjnqYyhKEuccwic9YBWWsRKYqsS75FSKqTSVN5hrEWsf2wHCO+982ETSK+VQkolpRRCKw3CE2lFUVQUZbUgpXzeIz9WGfeZqw8dOr7+vh96SAF8uwjz/1/g+gE9DDxQP6AXP/OZ6W43vdda9wFv7bvStLFJSklRFhRl6fGsrZQAIQAh8GitGS0v8uqL32TUW0EIaDSbTE5tYuuunbRnZslM+OiSsIesFySxRnvHYGWVfr+P99anjYbvTM14r5S3TshYKZkkMUpp+sNhIbz/qlDyI4roU7vvvfcUgAfx6COPqIMHD1ohhP//+QX2Dz2kuP9+t/YwTj36+Vu95Efx/GCr0dyMEIyznNIYKzxeSi9hPcoCAo/Ae49UCpMV/Oov/gLl8kWm202a7SYT09Ok7QnQkm37rmb3dbdQeoX0Jd5DnLSYP3eKY098hYULcyil6E50mZiZYnJ2M3sO3IoTETjrhRDO1WGh2WiglWQ0zrJIyY8aZx/e8x3v+NjaO3vkkUf0f+uF1v8tQzHghRAW4Mzjj34A6X/YWvO+iXZbD0Yj+qORJTwaKYVQYTv+Ac9KCLx3aK3pjzPOn5uj2DBDYzRmWBh27WqycfM2zr9+Am8s+2++k7HRJEnC0aee4NHP/A6xK9gwPcn05DQz27aDEiycP8/ea25AxRovpQCUAJz3fjQeO7z3QspGq9H4IeXcD51+/JGvmKr6qBTRL+85dGh1bRP/twrd4r/BwgoefliufeBTX/rC+5WUfydNknuEEAxGIzze4FFrma/3Hl8fWqnWflB4896D8yClxHtHFCX0Fpf4V//8F/nGE19l02STbVMTbJyY4KpbDrBtxy4uXbjIdbffxc4Dt/PNbzzJJ3/z12hIw0S3RbvToTs5QRRrFs7Msf/WO7n5vnfRz0tiBP5btlidmXvvvQNEs9GQSRyRZaPTAvGL/QtL//qGBx4YhqQRIYRw/1+7wN57tXZiz335kVss/mdazcYHKmMYjzNXn2jpnBNCCIQQ6w/RefFtF3gtRIfferwTJEmC946Pffzj/Ltf/1UarmLP5ik2z85y/YEbaXY7EMXsvvZm/s0v/ku0yZlIFVEcETebJFHEuNdDJJoP/tRfJ+lsoiwrlHTw7Rf4yi/rvfdJrHWn1WQ4Gr/ovP/f10K3914B7r9W2Bb/tU7tww8/LB944AF74gsf35Q0Jv6eFPKvKqX0YDS24IUUQq6lSs67Oi5L8ALvwa89VvH7P8Lak3LCIxEgJEpJJicnOXr0GD/7f/wfLM8dZ8fsDHv27ObAjQcYZwVPP/Mcq8vLbJqZJFKCSEdIpbFVyWA45H0//ONc/+Z7GY1KVL2B3vC5fv8HDaXY5ZW3aZLoJI7IitEX+quD//nG7/n+58JfP6SuLP/+u72D/UMPrZ1ae+qRz/05ofXPp2myqZ8NUULbtBMr8BhjqcoK7xxaRuunlzpRljI8TvdGsGL9MQshiIRAS4XJc1YXLvHqE1/DW8M777qVkyebNLWkEWl6i4vkRcmZ10/R7XbJ84JKS1RZ4a1hOB7zju/9ALd+xzvoDUYo5cCJurb2IWf/lp0m6nci6/ctpBDWWT0qM5fL0k/PdN8RT7aemXvlqZ8t5gYPCnEo9/4RLcTlcvC/uxPsH3lEi0OHzLFPP7al0xU/F6fqh7yWxElkokToKNZoLUGC95Kq9IxGY8YrI6q8CgAEAu8Fvj49rj5IUkqUVgjvsUWOs5ZRr8fpEydYOHeG0eoSpsrBFrTimKTVRNdAhheeyjmOnz7L3Pnz4BVJ2iCNNabM2bR1K9/3Iz9OqVKkEKRxhEoaSB3jEVgPxgHeIsRarebXN6PzFqEdnU6L1lSHpJ0QRdoipaQ9KTDVc1Tur4jmtq+EZPNBhPjTAUr+VBb48OHD8sEHQYgj7vXHPnufF8mvTU91t1eiMCrxSmshJAYBSBkhtAIpiKMEdIytBMuXluktrhIRARKLAyHQWhMJRZmNWV5eYmH+IqOVZfLxmN7yClm/RyQsSoEQFiU8yoMg3OlCCJQCHSnSRpNsXLI6GOFR6FgT6xCqjbekSYKKE6SURI0W7ZlZJqdnaU3OELcmEEpgrcd5j8AhkFjviVuaqdk2zWaCUB4hQQiJEwIlhaHd1TiNxf0tHe/4+W/NT/5ML7D3h+Xabjz9+Bf/HoJ/kDYSZOQtvlBKGqQS6LUUSaiwwEqi4ggZJUilkTqmtzhk8fwSwktiHeOco784z/mzZ1mau8Cw3yeKY6xzZMMRxuQIWyG9AcIiKyGJhAyvJgR4kFIQRRIpJbFOyMqC/jDHCdBKEklJFEGcJMRxhNYKaz1ladFxQqPdpDO1gfbGrUzOzKIbbayQOGdJGpLuTAsVCYR0SKEQKIQEKUAqiRPCCR0jJzdLyP4DC/N/U2y848KfRsgWfxoh+aXPfWxrs9H9F81m6/3jcuQ67Yhx1pNaOSIl8dIhKnDWIj04BSqNiaMYHbdQkUZGChGnrC6MWZ1bZvniPK+/+hqLc2cosgKDZMPGjVTG0lvt4csMW2UIV6KVQwmBEgqtZDi1QgbMq762lZZILdFK4Y1hdZhThYIbJSWpVkil0FqRxDGNRgMhBVmW4b1H6wgZxaStJp0Nm5nctovmVItGKyZOY+JYI7TEC4F0HuEM1FFEaonXCSKJKz29IcLKV8iK/0l0dv+e9z4SQlR/5pKsR+rFffpzH9vaSNtfbLca1672+9XUbCca9S+hZYHWGmctPssphyPylT7VYIiTnnSiQ3vDBtLuNKrZJPIxcayYmmrx9Be/xMtPPYMvKow3jEZjpjZup7CapaVlfDlCmhxrDUo4vPR4IUIBVd+7AoEUEic8zrvw/17gHCgp0ZGmKMqQvQuBtS4kTVJSVgbrhrTaCd2JNoP+mLIoiTzk3lPlJxkuzbH/tpsRrU3hxHoQpUB4iygy/GhMmWc1cpYgOl1Upxu5qjJyZsM1pMln/fDEB4QQv/tfMlzr/1KLe+jQIfPCZz/5lolG+v/EUXztwnKvmtk4HZXjFajGxM0Y78Cbkmpxif4rx7l0/DT5yioIaExN0LlmD5P79zG5bQdKdJk7fYJnn3iG40dfw2Y5Nivo5yNEOkVzaivzF+eosjHSFThXIbzD43DOI4XAS1GfGgkqxEjpfZ2phXJKCgVCorXDZxmVF+ANUmmUEEjnAhSKYDTMEV4yOdlldWWVPB+jTEwjjfHZmPMvv8qeZpOpTofSG5SpiIZDRufOUp27hBuMQIGZ6iK3bCTetIHGxi26WtU2anUUcfLbPjv714QQH/L+IQX3/4nr5T/xAj/1oQ9Fdxw6VB37zMff2241PiaEUKuDoU2azUgqGPYWaLVihNAhNg7G9I+eoPficVhcJRnlVLZkcPoSy2cuMlgZsbJvyIX5Fc68dprRcIgzhqosMVUIpXuv2sewEuRZDmWBdRVSWCIcQnrwNUgiBSiB0AqpdVho7xHGhstJCRDgkESRRkqJsRYrBDZsDbwIyLcXCo9kPM4BwcREl5XVVcqyZOwc1saUFxcZPf4V9t10E7uuvQY3zsiOnaQ4dQYGGZQW6yv8fA+9MsZmOYUXRDJRTkhPYrRs7/zXg7ljVwlx/U9777X3/k+EZes/6cm9vLit3zamktY6KxCq1WxSjlawtkDIFKkk2nl6F1dgcUTa7KC6AiuH+DxjPM5YWR6y8vLr5OcWyAuLtY7KGHxZ4a1llJf4eJL29HYuXTiPMSW2qpDOoGWFFB4hJApZ184KEUVIHaF0DFKC81hfIdVabR1CuRaaOI7IRxVeShweL8DXp19IGU6ykBRFiRCSbrfDymofPJSVxSNQgxEvf+NJepdWuGbPPsqxQkdd9GQDm5fobIzJM8rziziARoLodEjTWFirvCvnq/b05N859nufRAjx03Ub0v3BIPwf/qX+pGH52Oc/9t2dVvujla20McZLKRUIuhMTDBfPgShptlrIJEWNc8yFZZSRAX50FqsEfSG4BJjZjWRpi3FpMZWhKAtcZfDWYr1npT+mveUqNu26ltX5s5TjHsZkWFsiMUjqBVZ1ghTFqChB6bj+fYzUEd57hJREUYSKIhAe4T3eByxc1HdvFEXIOEJHCVEUo5UGpbD1NRDFklhrSutxa6sgIFKS/soy/ZUBW/YeIOluwFQGEomKwuaR1lMVBTRjxHSHKGkio0QIgfJWVtqKt/3k+7+3Nfu+D3zuqQ99KPql3/3d/6w6Wf7nZsuHDh0yz33qI3d3G62PVVWljbEBR/YWpcF7w3jUR61h6wJMZVE6oZE2aaQt4m6HkU45jWRlwwyjZotxJShyQ15YjLFYazDWUDnLuChodLpYpbDe45zDGIO1Fmstzjmcc1hnwyKuMTikQGtFpDVpkhDHMd6D0DEqaaDjFFRE0mjgnaMoCqw1ASmToWSTcYpMG6i0iUhSrFIURYlWAcNWcajnrRdkpUEIQ793gWee+QpF2qR57e3I6a24zgxqahbdbaOExy4OYJDjTIm3JdaWCGmjUT6uZqan/s4rX/z0/3bHT/1U5Z96KvqvssDeH5bi0CHz0sd+c2s3TX7Ne6+NrZySQkohwv0nFc5U+DJHOIcTFo1HWkGkY3QzJu60WEHySl4x6kxh4yZ56SjLgqqqMMaAAW/DQjrjGJcGIyTOVlTGUxiDrR+KcxbjLMaHRfbO4Xwd15SESCNjjYojVBxTuQqLD+E7aSKURAhQSlEUBaUxlKYCF/rMOo7RaQPVaJE0Osi4QSUiCmuJJcRxjG62EHGKlYqsFBgEhV3h6HNfxjhBe89NqNntqG4L2e2gdQJ5gSsNzlm8c8jSIoxDKqUXe6umkSQ/c+wzn3yvuOOO6pFHHtF/qgt8+PBhCQ/6F3/3oc2N7sQX0iTZP85zG8Iy65gwXuCdwxYltqzA2JCsaBAaRLPJ64XhxdUR2eQULmlSZZYiyyiKAudcjTtbnK/w3uCAwlSMxiOcMSEZsm799FprsW7tV0CXXH2SEQKpQugWQJokWGupqiqE4qSBjOMQXqOIsqooypKyKqmMCfi3VogkRaZNdLNN3GyDiqnq8Iz3xEmDqNlFJi28jClNaD4UZpVjRx+hMpbmtmthchdONhBxgo0jlArlnPc+NCycQwiEsVZV1uhuq/nbL3/2k9956NAh81BNDfrTWGBx8OBBCYgoiv5Nu9W8bjAaV1KKN76g8HjvEEJhLFTjEa4qsZVDSIGPFK8uDXh+sUc1tQmvW5iswhY5ZZlRVRUehXcOb6saf5aIWGO849L8RYqixPjQoDDG1wsdTrkzDucspTFhcZxljaAjtArZsVZ4D4P+gLKqEFIRpW2kioi1pipLqqKizEuKLMMUBd4JHBpUhIgSZJqi0gZeaDwC52yop5OUuNklajVBReQWrPIM8gVOHn8KIyytN38HZu815EgaEx1UNwkLjMW6kFDayhLJSFjrnfU+ihP14ec+9ZHtDzzwgAsH7b/wAvtHHlGHDh0yL/3Owz893Z1479JKr5JCRL8fGhNYa0PLTkcMh33K8YhyPEbEMa8t9Xn+wgpqchOIhHyYkecDinKIKXO8d0gpcWUJziKEROoInTQw1nL+9EkGK4vrhDtjXL3QBmtMON2VobKGsioxpsJaj0cglUJFGmsNUaTpr64y6A+w1hInKXGcEMUxVVlR5AVFXpKNx4xGY4o8B2fW73UVRcSNJipuhMzKOUxZoeIIncSotIVMW1Q+Zlw5ZCxYWj7J/OoZqk0TTLz9HXDLzYit25DtWVAa4UVI9iqLLQwiADQqK0ubJslsEunf8P6weDActP9yWbR/6CEl3vtee+y3f/nebrvz4WFeWCF8JITkcmNevKE/G0cxrhjRWzhHRIVQmrMLI144tYzsbKSygsHyIqPeJcrxMlWRYa2g0WpjqxxXZaFhIBVR2kAkKa+fu8CFi5eYmZxBS0U2XMEWI7yrEN7WlYRYx33XUCytI3QUEaUN4iTFVBW2LJg/fx5nHc1mg2a7CRLyPOP06TMYY9E6gCBegFaKOI5QWsM6zVbincUWeSi/nCdqd/BKIWQU6m7AVBXCl7Qaivn+CnFninR6M929u/FpyM6FViHKCEVReFaXRwgf2qNKSlkUhZnsdPeeeXEi2fjO7/y8f+QRfeTXfs39iU/w4cOHJUeP+uMf+dmNDS1/w3kj8E6KOhwLH/DdK8ksQkjysqA5vRXhYwaX5jl96gKvnOoRT+9GJi3GwwH9lUsUgxWqYkxZlfgoZLRFMcCLsGBSKdJmE1PmYCvGRcaJ48eo8gzvJcaunWBLaR2FDX1lU5RURUGRj8nHI4oioywthtD601phTMHCxfMszZ1nPB4jmw3aE9NIEbHY6zMqcrI8oxiPGPVWGa2uUI6HIeM1Au8lKtJ4HeE82GyEz0ahcyXrMi1JQGqyDEoj6CjLsUc+Rf/scYxqk+64Gps2AhXElHjvGPRHOLdGVQLrQQilhqPczE50f/r0Zz/6PeLQIeP/GPfxH7nADx44IMSRI876zj/vtNvbi9LYcEYuN92ttVdQV8J/i6KEpMHEpt2cXxYsjFokE7uQcZtslNFbvMS416PMMlxpqEpDq9tlXGQ4Z5DSI4RHqdB3GqwsgzNI6Tg/d5pLi2dxzmCMpDSewrhwMq2lMoaqqqjqZCnLxmSjAcV4QFkWSJ2QNNpMT02xtLTMxfl5Lly4gDWOVrfL9MZNLA+G9EYZw9GI0XjMaDigv7rMsL9CMRpiijG2snivAtzpw7MY91epRsO19B2pIlScYJxgZZgRa8FENeCL/+HfkS1eAtVETu8m8+CdxGSGrJ+hUKE5stZlFkIIYSQul3HH/9KZM5+Z5uhRX3O9/vNC9Bob8LWP//IDU5MTD/bzwkgttBAuvKg3OGdwvi4xhKx/ZFAJCO+R7Q5jOYGe3ENOgilHXDhziuULZ8hHq/i8h7EVVdylM72B4aVzxNLUXZ0YHSeM84xLC0ssrawi8ezdshGf9ZEIjBc4WwWc24f+rySwLwRBxXCZgSHQKiJOG8goIlYR586cZbXfJ1KaNNK0Ok0Q8OLR18gqh4oUsQQdVrDuLevA9vO2BmwMpioQ3lKWJXlRoqMIEUXhyrCOqsyxZUEkYXbzDK+/foaz585zw21vRiRNqqrCZiOGqwVFsU44q69AkNKjtRCyK+yWm3d3O81oi3znD3/0wYMH/9BQrf4I9iM//uCPT0gRf9oJmsbVGGAdjr0z2KpEEqA8Idcoy+FNGe/wskuVbmSYGwSepYvnmT/1CqPeJUzWR7iSUV7SmtqEAvKVi8SRQCmFUhFOQG/YY3VphcFwyE37dnHtjg0kAkajMXgwxuKdZe2+uEycDkSawOkKmbaUEh1J0mYDHTdI4ojXXnut/j5PmiR0uxPMXVzizLk5lNZENToFHoFAeY93FdZZnLM4W+GMQTqLNxW93gAPNBppKHuMxZsSU5YIb2h3Y2Y2buZLj3+ZqdktbNm7D522WLp0ifFghETxxngYCAVKeNrTqZTtyOh08tYHH/wLT4g997zqvVdHjhzx/2lY9MMPS3HkiH3tTR9+cLrb3LAyGFghlFrLlCHUoFiPwwasdw2cr1/KC8WoEAwyg9Ix1XjA4oWLjHvLVNmYqhgTiYpx5ZlttOmvLgAO5yTeB4zYmYIqH2NMwZtuP8CWqSaRtXSSKTwrLPYyZKQpS4mpbKDz+BBhvBSIyl9eaOdrqq1FeE+z22HHNfu4edDna1/9GlJrokizc+cO7rz1AIuXzmPLgmGuiaMCJRVSjcE7mqZFVBbESYKWCm9tuFo8FOMh5bwjjhMajSbehToeFFnuGA8LWrNd9u7YzG/90r9m34030di8kdbsdgYLA2JJyKa5zBwFhbOW3vkew9VVufWW/b5YHf6jb374Z78ED+dr+ro/1gl+6KGH1A0PPGBPfeLfXquE/3A2HjhXFRJrhK8s3lp8VeFNhfcSVIxUcTjBQqw3tg0JA5OQl4ZYS+YvnOP8yVfoL89RjAc4k+NsychopjftoLdwllgURFqjdATeY23BYNjn7rfcxS23XIOSoRWopafTbWGsocgztNIBXLGhDg9io7p7VN+PeI+3BlcZrHVEUUTabLBhZgPD8YgXj76MkgolPBunu3QaMdmgR7ORogBr3ToHy/uAlmEtzlusrfDOooSkNxgwGo1QIvSZEQ5jXNgE1iK0oNFMSXTKE088Q+U8N9xxO0mzRd7vU2bj0O58AysjJHVaxCFb0962bLQly+TS9L4Hvnrw4EH9a98mVH/7Bb7/fvng9deLE3L4y01prhmNVryllDbLcHlOledUVYl3HoRG1iC+UGsLHKg4hewwLCTOS7zNOH3iZRbOniLvL1DlI6SvyMqKwsd0uhNkyxdo6FCSSCmR0jPKhtx216286Z7bUTE0W22U0nhXoaSn02ojvCPPRgilUVrWeHRo7EsCshaCNOAc1gYotMwKlBCkjQZbtm5lOBpy8uRJbFmQCsuu7dvYvn0L/aV5IqWQKsaUJdLXNHwfooL3DrxFeoeSkl5vwOryCrGsy0it8C4cCrwBYem0W7isYjDMeOLpp7n34DuIpyaJ44jewiXUtyxwSGJVIPl7KMcVeb9yiOSWv/4X/vxvfuyRLw8fPXhQHHnsMf+HLvDa6X3rd93+3RMN8eCod8nqtlabb7yW3rkzuLzAWYcTAnQTmTTQURw+hJA1LxmciMllh8FoTBRLeksLnH/tVVYvnqMYroDJwTv6WYHVMe00pewvkSaaWEu0FozHQ/bfeC1vfcdBfKTQcYO00aDZahGlaWj0VRXtRkq7kVCaHO8MURSFp+Is3lscvoZPfeBXexcAkSKnyMZYa0jShB07ttFuJCSxJCsLNu/cwXf/wAeJI8H8hfOUVUWyxkrxHlVTAZT3SB9YllJCNsg4v7BEHGuUsyilaoSvwhuPt45OK6EoCsbjghMnj3PzzTcys2MvUbvLaHkJX5R1TsO6vm6tNPVC4ConitL5icmZ7mCYT3zwL/6lTzz4V/6KPPLww/4PvYPvP3rUHz58WMZu+Wd8hffaEW+cYnrfblaOH8esjvEqxusGOmkgkwaoiLXKae2u8UJRmAonAgVmdXGZfq9HmY8xVQGuQgpHVRZ41SLPx4ABFEom5HnOll07edu73g5JROw1PvY4b4jTFlEzpdlt0WgvMlhcJkk1rVbC8vIqi6sjMgFEGmfD7q+qEuc03hm8s5jSQmkwZUU2GtFbWWFmepq9e3Zy/W03s2n/PlqzUyRJk3unp9m6ezdf+MQnOHf6Ao24iXMVebGW5YYWoPYCpSRSSYbZmHFREI1H6IGmSTuALw5cYRgOR+g4Jk00082U06+8wP673oyONjE1vZGLvT6xlJeTLb/WOVmTAESAl0u9ntNx9Odf+fzn/wHvfOcp7728Uh6j31gW3a944Ih7z8/9re+ZmGjdaShsHGk1tXsbMmkyve8qVk6cIJYNrGyBbGBlhJeBXIYQSELj24mYqhJopSlGI1YX58kHq1TFGGcKtDcgwViHqiqqbIQUCikkVT5mcuMs7/ie7yLpdHAuyEIDnGJw1qEaEUmrRaszSTbbDzXq0jLtVszURM6gP6I3GJCXFmNtKOWkByRV5bEy/LmuKnSZUxQF1WhEu9Xk+We+yQ/cdx9RK6UqSuKZWW48+B1s2b2Nxz//RV78+lO4rECrOJASigKIEWjKwhFHGiU8VZZjIk2eZWgpkZFGINDOM+4PmZjsoKynEScsnzlF9fIpfGNAa7bL1OZtDBcuISFEoDUCgvfrVQpCCO+c7XbajdVq8PcE/GX/LdjGG0L0AR6UNxx72P2l977t/253k2tMK3Kz1+6SG6++Cic1jW4HKwkJg49ANwIVR6wXm+EUS00lGvTHFqUFK4sLnDv+Kivzc4yGS2DG6HonDscFWkc04ohEWjSGuN3guz74AWa2bFrnQoeyKdSxWoUkTEcJUZKStJq0J7u0J7uk7TbNVoN2p0G7ndKMFbH2KAFaeiJJ4EqLmiThLM6WeFtQVQX98YCpzZu47k13E2mFkCI0SZSiO7OBaw8cYO+1+6msZ3npEqbKAolPhjJKoVBSsry6RKfZQNeYgBSirj48GI9SnijRLC0OWJi7RKMy3NDZix564ukJ2ls30FtewXn77UrYdQqwB+GsBcSen/rxn/iXm/bsKQ4fPiwfq+9iffnuvV898MAD9mu/8P+6qTHdevf0DXtde+cmrSdThBPgK1yi2LD/aty2guFCxsrZPlhqzFW8ASAzJjQdtI5YWVxm2OtTZENcmaO9QygR4rnzKOFpRRKVGWSqeft738OmHVsw3hLpOCRcWtfaH4FQAuVrjlfkidMG1jRpdCeY2LgZVxYU44zxYEg+6JGPMvLxiPEoo8hzyjz0e9fCn9KaJG0wu2kbe268kQNvezNRM8F6G/h5gWdLJUB2Zth11wZ23XArr7/wPM8/8XVOHH2JweIKvlL4Mqc7s4G733I3x489TxwpyrIIiJwQ6EgBkjz3ZKMyEAWd5VJvSC8bMtn1VL0hyfYZ4k6L0VLG+tP1V7R01ngUUojKGDvZ7Uz3RoP/Afi5gwcPyjVLifUFvn/D9QJAxs0f77baSVGUplFWMjLNwEbEBm2O9ZRFTlWWNZvp9xOtpQdnQlliy5L+8gr5eEhVDLFlhlYOgaKylkTB/m0z9JcWaXdb3Pc972bv/qsxzhElQVUgVSj8VaRJ42T9NFTOYqxBeE9EgvMhiRLW03aeae/w3iCsw5pynQgg6kRQaoXSiiRt0uxO0p6YgW4XB9i6zRjFMVgL1kHaAKmoqhzRbbP7rd/B7ttvZfX0aU4cfYmzJ06xurrCrW9/B/uvvZZ/8/ePMLwwh5SKvCgIVWS40opSMu6PAuoWS5JmRFX2saagGo1JKkPabjJa9KG7Vn+2yz33K5RbQlBVJbqR/kXv/c8/+OCD33oHeyEOCfvsv/35yaIqf3g0NIyPn5PD+QtM797G9DV7IVKIrGDh5BmKlQKqBpbGFXiLeIMY27pQNpiyZNTvUWVDqiKr0zAHaLLxmKu2zXDjVZtY2tDitrfdy879u7FeEEUxYk2RADSbTVYWl3j+2NMsXrpEd2qSW++6g9ZEB7umRlz7/rr2FVKAlIHsvlajK4HUCik1Siu01sgoQqqYQniEMUG/hCfSEceffobnnnyS6akNTG7bxo59+5jdthVrC0oflA6T11zD7dddz+2FCWT+dhtwfPAv/mU+/I/+Ico5KlthKlV3qBTOemxREasYrzS5liTTXbw1ROMKRgXNZotF/0Zx27cL10IINRqN3Y79e68lv/TOI0eOfGaNW60BDj/yoDpyCFM6d2hyYmJDVpY2jROl8AzPLhJPdOjs3Ebv/BnyxTFaTOBEhPehNFpbYu9FIL4hcb7COIEtHPm4T1mMsGWO9KDR5EVFoiU3XHcVs5s3c+Nbr6EzO4v1taisJqoLBEpoHv/84zz5pS9TDIb1lnR02x3uPPhW8jyvb4bL7UshBEIGeQo1FUdKiZcCJxUSjapZHqzdn/VVI3A1f9ry0V/5VVbOX+DAgVsZzi2zePwUG6/Zw41334mWAokM1CDrAxEglrjK4b1n6513ce8HPsBn//2/o5E0sbbCGY2UGtBIIsY+puenSLsHeOTEMm/b2GRPd5JieYl4doqJ5gT90SpC1sT9ALp/G3Wjdc1OWyIaDwCfWfsGDfDgwgF/JDAd7ldx4oXzOKGwTiKVY3ipT3N2I/2lAu/aWK8xQgSmhVdvqNXWuiplWeGRGFuQl2OyfIh1FYkCIR3ZqM9NN17H5l07mdm+k7g7iZcaKRXBKQGMMTQaKY988VE+8Vu/w0SSEqXQneiy79r97Lt2P0VVhpo0qM3WF1UKEeiuNfgi6z/3ItBppQgLLtYBBVHnqxaQiLqJ/57vfR+PfvqzXLhwlhPHX2FqZprzL72EK3NufcfbcbaoCfW1WN3VagoUzlvu/r7v5vSJoxx/8kV03MZYg7YCpKKUKQu+yx0PPMB1b3kXF158ntNnXmVvs4HsZ2AlmzduIq5azM9fRFkXEK5vEZ0HDESqLMtpTEy/x3vfBkbee6FrDNM++2//7aSLy3dmzgipYyllhFMSIwyMPIOzq9ixRviIykscURBrY9d7wBAEWFo7qiJnNCwRwmOKHJuNUd4ghKA/HrF5doqbDlzH1ObttCenieI4iM5kaBgIFVpw5Tjn+NGjxNpx3U3XcPMdN7Fn/1VMbtlE6R3WOaRWdTIUZCiiVjX4etdHQkH9ParWKnFFl03W/WzhBF6EX7amHt34jkPc+La3MVxa4MRLx3j2y1/jzCsn2DvorXeohF+7Smwd0RRO1HVrc5Lv+tGf4MMn/08GqwOsTCmNIlKG3FZMXHs7226/BxLH9bffwIamQCQ1scArjJPM7LuaxrZtnDt6FD8aoTxU9SJLJeowjcjLwjZkugV4mxDi0957rR999EEFGLru0FSzPVu60kovFT7sMkGELy3L5wcIH+PQuLrU+n07ydpQ1ijBpM7o2wHWxJg8A5sTyRD2JJ6bb7uNDVu30Z3eiIoaaB1Rw0G1rCSUJ1VR8p7vfDe89z3s3LGDuNGglJ5xmaOlRii5dg+tE9eEEHVACY33oBMPXOi19yy+XemxbuZS93AEVGWFkpL25k3cvH0rN7/1bfSWF+ls2ABVFSLFlc+hxvuFr3MR4+ju3c+7f+SH+A+/+M+JiHHeEBqQmqg1Q+4iZlTMaGGOWVOBaiIijYkUlRJooWl2p9m2/1rOPPdNhHUhWNb+JUKIYFRibNCqOnM/8GkAeXDhgAdIlfwBHVu2XLPFx1MaJ0qkkoDGuRRsivURxklqo4T6s4j6BvDoOKHZaLJ85lXOfvMxqqVTeOsp8wznchqRxuQ5+/fv5qrrDjC1eRtxs42MQltQ1NK/EOKCIjBpN9m2bw/b9u2iUo5hMaaqygA3eoN1JrAwxRuSjnV+2Fp/JZSO9cn18g9qkYZ/X3ed6joT4yxFGQh4lYCJLVsQOgJX34e/z6fDEsQvoRy0ZcHV993Hrffei82GaGHxTpL5BKOSUAbpBF96Il9vmCRGqDXGiKQcDUmNpzUxQYlbk1Zd3owejDESSu/gPd7Pt4UQRooHHrAPHT4cJ2n8lomdG+jumpKz+7bQ2TABEpys364H5+v7qobN1lJ05zxJo81EK+Xc0ac5+9xXGM+9yvDscbJRD1uOkR6MqWi1m9x1z3ewefd+os4GZJSilKhRprUqugYHCHenUxLnBapuysfeo61FOIu3BuE8zvl1uu2Vp1SsLaxYA/nEH05kcUGc5l2Qt0ZCEWtNoiDRikhKqtKsd6e+jVFHqBKEQ2BRPvi1eRlx6M//KNM7dmBNifWOzAtk2loHeJ2VKBNyAeIEqS7jUHYwxPWHTE5N4MTaRvaXNyYSU5WSYuSl1Fugc8t6krX/hh0HomayRSaxQ0oZN1NUGuN7ecg6/RuAqnAI1p6HgyhJmJjocOrZr7B8+gVEvkLD57h8SLZ6CV+OUQQA//Y338mNt78Vn7Yx3oHNwVXrzAVxRRcFGV5HCUEjabA4P8/R519kfm6eSGuuvfZq9l93LT71eOPwek0S41BKr0XcdR/K+q5aT+KudPERV3xAj8dZS6wjVubO8/ILL9BfWSZNUm689TZmrtqNcQG9uvLffRtPFoQPyZ01nub2Xdz7536Yj/7CPyPGkxkQSZvKijoKeQwW6qaI0wH4TQBhHa4sac+2idMEN8qvaCOGsrDMC0xROJ14Cfot3vuvaIC40X5zJLQ6f/SM2c4eubqwyujSACkb4WHLK05u/WN9TYNxVjAxNc3C6y+xevoVtMkwRYXMLLrq46J5jPFURUar0+W+776f1satZFkOJq9bjnVYEkETJGSguAota+pOxDeeeI5Pf/IznD89R7+foxopU489wX1vuZP3PvB+ZBLjnQDFFXexD01Cr4IWWFy+Y9fD+BULdJl87kik5Ikvfonf+rUP018ZUqFpT8/w8d99hPt/8P3c8653rJuy8G0W2a/d53V/XAqBGxdcd+idvPrMc3zjc5+jP7srBJNiiLUdnNDkzoCpENbgoyj0nAHhPHJcIH2b5kSX3mCEFgHwDUpKSZHlVKOh0N3NWHibFuIfhbYm6qCzGk/E/OkFylWDEk0sAifktzUEEID1lqgT40ZDlk6+QlSsood99MoAvdxHLi1QLFxAOcNgXPDm+97N1bfcSS4TlNaBKK41kQ748lrZsla7QvDteP3MBT7/+LM89dwJVoeWzTfcxC9+9NP8/V//KE+fmufRL3yBSKp12o2/4k4WImyYNZqrFHK9ZBJXlE/yiho6Spsce/Yo/+T/+llee+l1KhfxfX/xr/ILv/1ZfuJ//Qd8+Dc/wbOPPY6oEaY/VC0g3riJvLO86y/8KFmjxXA0ohE7jMkoTIWIAmsD63BFiTQOX5hAqkAHemVR0W40a9zBvyFvcJVl0FsVuBxwd3jvZ+SLDz0UO++uyY0DUlGOBJURQQOErvuob0xMvAPnBM5JGo02vUunsPkSwhTQHyL7I0Tl0T5CDZex+ZD2pk2843u+jwpNJD1KhpJFaYWMNDoOEk8VxSgdI1VEojX9YZ8zF3LOzvWQQnNptcdNd9zF1TfcwNU33syP/bW/zeNfeZbB6iJyLdJccWpkcB0DNAqNkMETREoFSuOlWv+FUggV42XEx3/74yzMrxKnLU6eO0clFXGacuNdd3P9jbfx8K//FmbY5wrUEIRECF03YMIvv8avWmsrliWNzZu56+0HwZekyuNLj80sNknJpATn8IMRIi8RRQlFhVNgrYFRQZKkePXGSOQECC8YLg2F6a8gnNtQUu6URVNusbA/MxUWIT0Ki8LxxtD1xl0p1mvOWGuywQrSG1xhsFkF1gV1vRa0sPhxj/d84ANs3nsttlqTeRIAhzU/jkgHRUBNLle1EnDQH3Ly1AVeffU4Wku2b9vAs09/nS9+6uO89PzTvPrii3S6s1yaX1jXHq29Pwd4JYikQiUxMk2IdIKSEa6WmAopUVqHhEZIZJow6vU5deIkSdqkyMfMbNzA3JlTPP6Fz/DasRc4+dIrrMwvcOH0GYRUb8ii/RWVxe9Dm+rSz1cV+6+7jkaqoRzjTcm4yBFaM3ZV0HONS8SoQI5rsp5W+MpAXhIJUdfJ/oosutZBjUZi5fyclTIWyrq7tLRs17HWPlD3rqz/17O09ffpL1sGIgRKRXhjsEVOJATOGbytaqG0QCpHlOUcfMtdvPeDP8CoDAp8XycUOpJ4qdcoAlcoEsJLyThleaHPK09/DVeNWBqX7OpsoRz2+Zs/+qNsmJpi28ZNJLGvJSTraEdd4kkQCu099tIK3khMrJCTbWQrQXh3ueZeywOkpLIGZyqMqRgVjq7OOP7kN/jor/4qW3Zu581vuosXLxxn2B/WKVmtqlzLT2q3F8/lO9rXnzH8lWPn3j2kqcSMBohWhyrLKRKNdgJblcF8QEp8Q2PGI1QSURmPG5eBk6Y1Jq++1XwP4WHl0gIbdq8IFaW7ZNRu39ZsdbT3PhhErqX566Jyv/77tfuk5ijilSRcdx4VKWQUcFwrBFYpBBqD5c3f+V7aM5sRtqxLCIvWwa8qEpJYaCKpiJEkMiKSCq00URrjy4Kl06/wvh/8AB/6nY9TjgsuHHuFrZ0WqTPMnXudsszYuGUTxlpQsvbmCMzEKC9Y/vozZF9+CnnsBGJ+heLcJdw4nIq1EmrdddoY2tNTzMzOsGXHTv75Jz7FLW97K9984ivMJBq7vMBzX/0SSRzRabXrGsYhjIPKQGXwJkSxUE9fth/3OJAeZyyz27ayZfMMo94SWnpcnmO8IJNJSECLArIxYpThe0NQAhMpbF4irYM10MZfXiZfe4+UeSFWT5/B9Jfv0Q416ZX+IzTBVyYLdfjzBO1vbQ8ktSZKm5AmuLwId591NLdvY/ttd5FbjxBuPdkREoS1SOeRziG9ReEDVKklRBJlLddcs5eN05PcumMP11+1m2u276DXbIb+ahzx6pkTvO3ee+h222TOggy8MO9ASEv/9GnOf+YRtre7VNu2oF1BniTI6Ta628D5CrlWFwuBNZZocoJ3f+D9fPF3vsD+q3dz3e5d9HbuJkkTIqmw44wtV29j48aN+HGBty7UzvU5RQI6Cne61iGiXAF4heS0zS133MKx48t0paVfjGhU09hY0+vntITAeIlyUC2PcJumcO2Uan6ZqHRIzxvCs1hDZpxAC8XK4hKD8aClfuj7P/j3283WLlOM1oPxt5YQl/8rL+OvQgCWWGuGyxfweQZSMK4MZjBGO88gL9n1jvex803fwWg8CMxCV6CsAWOJyhKZZYhxjs4KVGkQlUU6kF4ijGdqyzaSTspnP/zrHP3479D2EZ00xXjP0rDHmw/ezQ/9+A9i8WgZoQT4WkpqnMEXOePFJVYuniMbDMhtSbJ3O82rdgU1BGs6YrFeEmJh1w03cvHkcf7Dz/5DVl99ma3tCToyJrIWmSi++4d+gG17rsINxlBU+LyC0kHp8ZVDlAVYU0doWYfty3ohIQWtVpsXnnuFqenNjCwQp1SlpXPpEptVBTbsCiscdmYCJyXVwgJJu8HioIe3pgbS1hDAtXgtRVUajLFbtamqYh35+Tb13BsBgCvZOQLrDJWFKGmSSYmMUyY2zNLPSobLK1Syy44776KowhvVrsIaEKVFZSV+NEaMMyJnQ6dEKUSsEInHFwbXSCj9Ku/+nvexY+cevv6pz7Mwv4A1ht2zW3nv3bfx5nvfgjclHouMIqgqXJ5hyyLkAe02W7/zrfjlQbAa3rKB1tYdWATeVUhTBSsF51A6RUQJ1jsEnh/623+Vq66/mmNf/hqjS8sIFNu3bOLOe+9h39X7ccu9Whm2lkFLvHDh/vcWUQhcacAaZBrjozjU2kJgi4LNu3Ywu2mK3uoCUWMT40FO5BMu9XKGiSQxAeTIewPKpRXiDRMMppv0lQlNFuvfUNs7t7ZeNcG/dGiBmHbOrIfyP5713VoXRYEtSLqzDJYuooVFNTt0tm4gE7B587VM7NhFlmcIZymcQZgCPc5w/QFi0EfleUjS4gRrDY12i9FgTGOyGyQfZUlelVx/YD/X33qA/iijdIZuu4UUnsFwiJAKJUJ/V3rLa199kqaWdK/fQ2ETXDMhvWpv7cUhyKsykNQVRDrlmw9/HIvlpve+B9nVSCdxRY6Qgje/77u4+77voN/roVG04gYMxlQrPZTx62iSBMb9HunkBEWeEaUxMo4Rbg2r9iAFTkch3fIeIs0tt9/Ml774TZrxLGVvCdHoct54suGIflzRUDGdXFGuLDPsJkzdcD120MOeOImWElGbugVDfBPueRHVnTGH+rEHfuBDcSQRrhJSvJGVIb7lBF8W84vLdFEviKOYfDjAFAVOKISC0kp2vuleJnYfoMhLvCmgyGE8wvd6+P6AKMvIe6soBKYo0JEmy3OkCiR6YT2iptlUowxnDLoRkyQRRZGR53m401XQMhFFNBsNfvt/+8c8/7uPsW3ndiam20hJMDSrclyZEbmK2BYwGPHsQ5/kl//XnyWRggP3vYVKieBtWWe7Pi8ASNOEyIFdHeB6I5Tx4fT6kO2O+wOwHqUV2WBI2myEYOxqGYoUoBRSBoqxROK9YWp6hpefe4WqUmRG4JOEfKVHtbLAycihZqfpWodwjiISEMHy3Bz5YHg58xcCKRxae1qdmLihcbbEeo+OlEI4t67z9bWnoxKi9nkMfhfWyiuII2+s+6xUTG7czqVxji1GKNlCdWNmdl9NZWrb/arC5zluOILeADkYUhU5as20rL6nlNboeiQOXiNEXTMLgasq3DjDR8Gddh2NUuEEGW8R7QmuPvhWHv/ZD/G5f/ghdty4j503X0d3xybSVhPrHUV/zOLZi7z8xIucfe4VYuO46vZb8Frh8pJKRijvAlmgbkD4wiBGBTo3eLu2uH4dkI+SmEhHeDydiW4NCJlaryUQpYQqAlXVOIzEGUPSbnHNdbv5ypdfQ8zsZ2V5BbzgyUHGrut3IDZPMXr9IhNLjiQWjEY9hsM+Ssn1yOB9yCGSVLHt2p2INOXsC69hVwt0FOna9/hy+I2kJE0U7U6C1oJRVjAeuOCRvAbHX4GiGAe6NcHsrqtZOv86Ra9Pc8MEndmtjG0BtsSVBSYfYQZ99GCAyzIwBi2hMgalFFVlEJHGVTkSjQjbH6THW4GqVCCza1lHGHG5BSgC39haz233v5+jv/UJ2r0B57/8PMe+9BwoiNMIpKAcleQOGmgaSUKybYoDb30zFQLhBaayIRl2HqFkgAzXCHu1dY9z7vKALeeI4ugKEGitARDuZ+9V6MoYA76CmgUjEZANuemmvXz98WcoR8uUrokpBKLRZXJqEjXOEcsDTBphJzUjoZBvuEjrUknoQD1qhGekRGiV6m9tWAvh0FLSbEdMbukgpECvKMpigMn9G6warryRSyRxd4rNaYP+wjLRxCQibeJGIzAFvsiw4yFu1MflIygLpHVYKUGpyy0+WX9wLMInIXOXIuCzJgi98KH+XusKrb0XiaYYZczceA3X/Mj388I/+Fdsm53hqk2zdGc3MDUzS3uii1eKpaVVXjv6Mk+8eoz3PvAjTOzcwrKrSHSEMCbomrQO78vWkz/+IDN/EUrCtUPir8DAvedydHSBE412l0lCVU57usFN1+3gc4+/THvjfrwSbNy7nXarRXFxnp4ryVspXvpgwoZf6zBebhniyLOS3oUFWp0JRBUsoLSSHkF1JVyFI2SCwcc5LLrnCrRnrXz3Yh3cUt5irEBHMZ1t22lt2IJFB1zVFpgywxQZrirxVYEo88C3VhLhDMJpDKFWjpA4FFKGxnjAwWsUiKDoA4tHBWqPcCEzVQ7lKkx/hYN/7ccYvXqG6wvBNTffiOh0kM0Umi1oNLgqibhu7hwbTrzAPX/ue8mdIZIhC3bh1YM/hlc11hNqTyeCwuDKM7SWSL2hChEOh6gtEGtkTor10C1qKrAXAl+V3Hrbbk6+9CqiWdCPInbumEGbksZUEzWzmyqWGFEFrvaa+I3glC+lxGEwpWfpxBIregVTGbyTaAh3rFrrLTqBdTBaHaNwqFiR9XNcKS5/CB/acOEDqTeOx/BgbBVua+vwxoXdv+Zp5WtQwzlMfZdJ4UHHwdQEsPXPlnVyIVgrB0DW+GtQ2a0p++qRO8ZTaUsxHtFudfj+X/gZLn7xKcYLI9I4wUW6Nhl1GGHxN+zmXd91F7myeO9Qou4OSRF4yGtj8GrKjxOEDaUsXoYE8A/C69drDSXwQVYR0CdV19u29g4TAm8NrVbEO959C0OTcuKsIbJjlJHEk11sVVKK+tnZsFaurnmkDL1kIQUYT24qfM1GFd6hvbPeeyeMkOjgT4C1jnHhqZaysAMdWBe8HK/Msv0bGhK/v20mrAVrsJXBVSXU9arVNWjqK6Q1IAVCWCprkSIBmSB1WAShNELVCakMKgjhHcIJnHDhZKw9YGEQViAlFL0ecSNl8/veRjG/QnlxBVeUeCXQzQbxZJu4kzDyFbhAzV0j7Qce4Ro6ZNZ1V2jwkUA6GRbIBMUitcpwLQldc9fxqjYyjSOIdFhoGWJkwK8d3nmk1MikTananJ0fgZLY4ZCJbbMUZQauTjS9WBPB1qc36KGFCMjdOjGjptYKIdBxpIQw9T1SQ15BYinBrE3tDECn97I2MagL+2+lbuLX4TrvPXbNw6oKhHCPC4dNS2wU3iDCoxA46ZHYYOitLFJLnLagLSpyCG2xssJbhcSDV+t0KFH7DljlCQWIwKMo8hxhDHqqiZppImxwAHACKmvA5EjHFQoNf5niUz8gL+qeqxDBkj9S9ekBWQaj1PDRZW0AF6Q1Xih8pCGOkI0EHwf+tVtT7gsf7P5lzGiUcfLUIhcXHXnm8XmP3du2oKTAuipsB3d5guobe9B1wnvFTArnLg8I0UXpXq9KudtZ69tNGXK0+gO6eqoIomYterf+D721CKXCoxFhMkr4bdjNpixxjTLsdBfujTA9ReAlyIbAaYWzAuclSkoirfCxxCSgEoFNQCVAVGfSwuNdQTAM1jXop/DoK9gToS8qavcVWZaYqqpziFCT1usRvKRrvRPrG/fyDCaBBXeZrelquZ4QOkS2KMwjUFaBrcdyuNqIXElELBEp+Njj43BXqpqbbY1jZZixsLTI0qURS/2KpcVlploN9u3fT2RGVFWBEIGEb/8AlHGdDeodxoZIu5YQeiHRH/vko69UVu+emUj92+68TnTbcX2J+8uSjyuSZ+F9XSsHP8rgxrb2UCRWOISG0hviyuCrMnhU1Lts7S5DCYSqyfVSglR4pXCxQsQRVaTRsSLkOA5vS6gETnm8i+o0L6j4na85WF7gpcOJoLSXQlDJte+8rO4T9SZwxq3FtDfQbr33SBlKpgDJBqcAURMKgmGyAK2RIygXcnTcwicNvIrCK7i6fhRghacsBZWxlEXBOLcMByXLqxlLy0OWLy4jGXDXW+/ExduYX6mYboyAFUTVR9Xe5s7Zy8NFrqQoCijygqXVESvDcRirGyKp19947qXOxMRGnJkkKyzdjgwg9lqB/q3857WHsE5CDJtBeouVMUbPML/sWDy1wptvnQ1ZubXriodwDUi8DIQ0py1e1SdUe2TkkVE4tWvhUXqL9gE7DuJyh/UG6VV9Cmu/DKURPsxFMn6NflsL02ucRvlw/t1a4naFv5fwV5DwbJ3I+DcSDQWh7y18yLQvHjtBPIyY3t4OVNo4Dk7yVuMrw/LCkPl8SOlhXFrG44LxcES/Nw5TY0TGnp0beNONb6K18yr+xUMvs2omuXb3LNu7G0iyi5SDSyQyr5PNN66JJORIo8xx7LUzPPfSyyBrv2sZCe1t9ezK0tI9DZEhqJC4N+hdnXNhQa68m9bCshCXs1kkhZjgxLzm+VdXWZqb46pdm9nUEWDAWYOtEanaww6EXec/h9AuENbjTYUQtk74QkgPiUsVHp4O7rKBny1RNR/LeXAy0Gsvt9JqUMTWp05ekaX/PqbKG9gN63flupGRqzeAccgyx41HrL50kg3RJkx7CeFKRJaEEG1Ae8Fyb4lHn3uWUgUbiSTRzEw22TozyZZr9rBl0yRpU5EIwdzZSxx7eY72jKI30yJtTrJ55lqiqIlZfgUl1ii/l3v1AotxkqyoOH3+Agurfdrtlk9iLbx1J/Xm6ebLo5FjspX4dqzwVYV0QZezNhIdWYuQhQ5Za42ShOEXDidiimiC08MJXjrfY5QVDMYlJ05eYPNtG4It/xUE8bBRJPiweay1NVuklsEYj/cKQRh1J0WMc8GSQVLhMKhaseC8xCtdKwwkwgmsrUJ+IC4nJIHiKmsXPfn7qTTrIdq9IQwKeblMEqI2Wi0LzGgV0etjh30GY0fabKLGFSqOwwILj7fQlEPuvnEzcbdNt5XQbMYkSYKQ4c7EW7LMojstXnp1keMnL/CmbfuJWy0qKelby4aNO7Gmhx3MXSagigCiOBHoVeOqJLMFSadJkqZ+stEWGnFGR1Kcv+mGa+w77rlNpHGgi3gZctFAn7FIt8Z0tDhkUPfXdg04gVERPaa4OJJUxoU2nPY8+/JZbrthS0BgvKj3W03Jrx3xgi9HHbqdW0+UAqgQ1IqmAqE9ihCKpVJ4VZ9CIpx3eFGCcGFOg/SIteRL1q0ztUY1Art+z9ZMSufXa9JQJfv1kkPa+u61Dm8MriowwwFFv0c1GBJPRqwuLCNPNUjbA1QcUSmB0RbRkMzctJ2ZTTPBRd4U2GrEqCwQKkHEaSAeeguyze999Sl0nLBz7zaoM+9SeHKv6G68isG4T+xGgTyAxtXXZQ4MKk8lIpJGBx3FJFFMbKJT+tzCyjd37IZmQ0vvC+98JYSXNfQSikKpWT8hEGGFx3kVUB4gVxP0TYvSF3jlsVKRNJu8dPx1nn/pDNdua1HaPtJpvIjxmLowsTWUF1pba4mYqKUZGBN6sx6kAy8tLgrIkXVBOSgDjBbCsAoOdCgZoosMbrDh9NYENakuc7udD6B/fVL9lRCkv8ylcpXHOoM3BXY8puitkq2sUI4GxG1FuqdLb9Rj7DK0SIk6LdLpCaKNLYZpSbU8rkmAEiUjUBFOxkhijJWoRotvHjvP88fnecf9P0ZzOkFEFiclTkYUBnzcJG1OUfVzlAxlGEiMjhhZy3yhGMaT6FaMjpSPmw3igmfUjfv2sHl6yw9cvWvjlJLWe29CZSQcUlikzdm4dxOT+3YyXphH1gU1TiJqAdVKtJ0V02RceQpTUuQZlXWMBzmvHX2WG/dvR3pLVZZBKV8jUayXVvIyc0lclsbgwout64TWiPdXyEbWQr9wrg6v4efbdcZh4JetEcjXf6Z3dTMm5BwBEVtTNbh1ozPvQk5gTYnJM4rhgKLXI+8NsFWOMR4SQTKb0to+Sbxrgsb2CaKZJmXiMcIFY1GlQTWQSuOFxoq4Tg49K5ni8efOs/eO+9i4dydOFOhIolS0XtVHQpAKSzlaQYmA4duoxZCUoRTE0zPIVouo3faq0RYybnidxL+gP/7YY6u3XXvbceHMXnxVP/lADhPOob2j6PeYPHA9zU0XGZ5bRjuF8R5PRaVTxlZTWIcUDhUn6EaKHxdMbd7CqRfP8au//Tnef+gOmlIirEQ7XftGyZrf5VBChbZX/fq2vt+l9MHSX7vQUXKhUS6cDgmZkkjt8FIGWFOpEHmUxXqLcLpGomqaLIKQcQXc2V92rMELt45GuXqoh/UOZwp8GVzpqyyjyAqq0uGtRAuB1wLfiDHNGBUpLBJjgwugJMbXHHMn4nUEyzlL5TULI8/ZYcn0dXfDxDSVGYUZxiiUA+MNJZ7CaNK4g5QxnhInNQMn0BMd7rnlWkrnebv3REpii1JcurA4XCh6xzQgkkR92TnzLmuNV96jXB0mFSjtGS8sUpybY3LfDgaX+sixxcsK7yMqNLkTWBcQFC8UImohU4u1gu3Xv4nXX3+Wj33xKe69cScbJ1s4J9A+Dm51QtaTO+uT5gOECQanAhQYSrEArDhXJ17aI6QFrUINJAO32tdZf5hMWR/4Wilh6/bfGpzofZ1JX+FHtY61+7DxnHPB/rD21LKVxdo6/MsE0oSo2SZqtlGNJiqNsTICFT6RcBIvo9AYcZZCNrBOMCot85lkkWnM5EZIUoQPTR5LbeIWEH8kkHtDWymESnE2x8qEwsI1B/Zwam6F3/idxzDCs3XTrDuwa7OaaLdfeOdtt13QgJ9q2S+X+QBiIbXy6FSjYomoCiJnsdJz6eRL7Nh6N92NU/SOzyOiJs4H5gaywrnA0SqyIdaVlAKqJMYVBVv23MDZueP8+y+/wvUzkuu3baGdKiZbTQoPSayInA3yE18ibT0LylcgDVIE0xZc4E5747C6BC2RViGUxumwGFJKhBIIZ1FOg7QYFUAPLyKEk3XpE8yG7bcAB0JcdpVzLuQFrnLB39IE68YoTkHFeKWQcYRKU0hSfBTuVi/DHAfhA9JnrcOKCOFh1XiWqpgFP00Rd5FJA6+TUAI5QmT0wVLO1pxrJaCQglIqIiExdacq6bRpNtt8/ZlneeebbmHzti7//Nc+60+dH/iqt/SVd9zyU14DTLnRM1WZLbfiZMrYyk9t3yi233QTg3ML9Odex/cuYVdWmX/im5jM4fFYL7E+DMCant3Ihb7h6KuXuH77BLs3z3DyzCLf+OYx7nz7fq7bu4Wjx27kIx/5FNtvvpo3v+U65k6e4PixF7nzrW9l264dLJ97nfmXXyLKZLDlxRFFCulLvHRY74PEVAaUyZcOsdZI0h6sxEcWJ4LeCemwxq3PLQwJSzBqkYFns+4v4kRo24kraErrmh/AG1OP95EIEaFShQx2AYFbrSOESvAywbggV1E+yH8q5ymtoG88i6bLQLQoGlPYtIXSUT2KoKR0Gu9dLdGtvbbrJkPlHJWWlMKjncQhKBAk7Q4eT1EUXJxfILNDtLDi9ms3iE688Uu/Aeh63m/vy7/8j56P0+ZBUw5ssbikemfO0Nq5h85V2xlfOsvyC68wPrOIIUXoGG8rbHM7s1MbOPvi54hNyZ7ufq7eMcX807/DTt1gxz3Xc/2BnZx88nc54CM2fPA+brzpGs4/9R+ZSSLSu27nqhuu5cLRrzPZEcQ7FNncElpFGJfQGzkUTaSzCFEhnENKF+DQesdLWdsEyyDaElJSmiC8VkohhQYT7ubgMrFmHGPXVQdC1cCBUOvgTU1lCyRzK9Z2AU5onBIo5XE6wsootDl9hHVR3f5zFE4ytJ7VSrNomwx1B9uYQqRdYqXQwuK8o/ICbwV2zVy8ntOA9ygXSjqEJzYRla1wrsCIlMIJus0UUzmEVzz23CmM6fkfvf875V037B1u0OqpHwM0jx6UcMSnaePhOG4ctJXx1cAw//zL6JNnaG3eTHfTLFKnlFR4keIt+HSCSjYwwrBn9yy+shwfa6QfcfV120AnnM8E3lfs2rMTn5WUQ4EpltiyZZq4EbEUb6JPxcSmCXQyZmZ6O+rqjYwHF9HVKq3VFq8fz4h8I4D63iLlmrjaB5hchsRcyrAQUoW2Hja0F4Wq/Te0C+S7NSVD8IgLGbx1oQkhxboB6Bqs6qzDWROyaUcddsGIekpKbfNbWoGpKjLr6bmEVd8mEy2yeIKy2UVGDRoKZD3e1vrgb1I5XzNVAivEUqtFRCB+WBsybe1LirSk7UqEDvlEM03JxhnjcY4zBffedYO7+5ar1T/95Y98+e//5Acveu+l5tFHw8i9RH5ynJU/p2SUVl77GCsYFiy/epLlV88gncOKBk5Ius5ghhdYzTRVbOhUx8mzkirbh0kL0uoMxsYMhxV2wtGuXicbWwaLGXs2CLoTFc5azs0vs3GiwUyrQmjwrc345k5SFL3TjzMVneP06QH5qCQVClNbewlvUdIHaasLKnqjotAntgEJE7Iera6rwFM2HikdUvl6uokIHSNRl2lr/WRRw5KCuvSSOBOMVpwXOEJdXtRmjGWlGVlFzwqGJAx0G5tuRKUtSNp4pUlEBb6iQiOtwdQNe++Cj7SxLlhOOY8xwQ4ZL9BIYuspSk8iK7QcBfdckYAXdFopi8OcvMhxJuO2A/v9k998lce+fOxh7704+OCjUosjR5wPAtQzT//Wv/p6o904NBrn1lZClc6jpUIIHXJcJxCRZ/D6q/ROP8l453dzqreZ80/+OolfJbv6h1nKNtJ79lfQVUm55wd57WIXnvoQsYP8uh/nvB0y9+Q/AyFY2PODxPk5Ljz76zRjR/fGO5i8/X2w4TaSrbfgXj3H2JZ87egCm1uS6XZCu9OinUQIFM6HETdV3dCWLjAwwkkNp9dbs96mcyKUSGtWS64O9WtGLev3b+35JdxaK1HhcRTeURhPXkDfwIrT5KJJnkxTNqdwzS5RIyVWUR1pbN3UD6zHam2IV+0+75yjMo7SQWUceQnGCaSXOGtwRUlqPB3v2NbN6bgekqy+JiOazYTFc6vkRYVzzisZK58vD19/4dlPCyE8hw87DfDoow/KQ4eOmKf+/b/6j+jokHWFb6GZSLoUeUbfFbhE44Uk8QaXLTHlB5QXn2doJ1kpuuxP+tiVlxmoLvlwgn2Ni8gLz7A6eQ/jfpNrJ/uky0e52HgzjKbY377E4twLDBpvperFRO4CS/mjNGYmSCY3opKNeN1lYkfJwtwBzo8GpIvnmby0wkSqmGpKppsRrbSJTBvE1oAM71ELj/Qy4PLSoFTIPEOP2CFC9xwnXG0U6t9olBPASioSbOkYmZy+h3EVM6zarCZdjG7jGrO4dgudJqQ6IlbBjBRfkVsVIoq3QUttHZUPvh/GBrylsp7cOIrKklWQl9Ab5AyHY5qRYFMnRaOIVclMu8KJKmD3zqLSoKleXu5jCktVVu7s+YvyPW+76fEzT3/0whuc7h59tB5lq+0nB/3BL0RCRfb8op9qzYhk9w7Oj3ss5EsgHc418JPbMXMvMjU6yfylAcPhAnILzIzmODH3WUQxQjQT2qNTnJsbQlnh04iNo1M899wQnfdxXU17eJKzzxnEuGDLpjY2HzN69RiNffOIiW2U8TSb4tfZfvUdrPgpUp9TjQbMLc/x+tIcauEiXTvPTEMy023RmeiSxC2UdHglEVIRizUlvwrit+BEWXMTBQpT33sO6SzGecZVRa+w9GxCKZuMo2ny5gyyOYOYmMI1EkSUBlsoVQ8Xd1WwKvYWvMfUSZR3vr5HQxlpKk9ZOfLCM64slfVURrDcGzF3bhFiuO7aPVx/9Va2TzdpI2jJikndR5TL5EVGZgVpu4NHsrA6JC8yOrrJ0y++LJK2/0hY00ff0BtbH6Hztd/4hYc3Tkx98OJjz5rJhaG+6u6bcFvblJNwbmGZJXU9PjPor/wzJvN5KgQuVjRF0PrmNSqFr1DOMbCgVYOWHiFEzNAJUqWRfoyxmnGpSFJHpyERRYnfOMnu7/1LyB3volg8R/bqx/nY+f0czfbRbka1Wk/hKks+HJKtXMIvnISV12kUK2yMHdOTXRqdDonWqDgNbBERRt4G/NvgTImzhsoBNiMrDVlh6JmIXjxD2dmO7G7BdzcgG50gbIsEVkuUByXsFa6vYp116usesq1BEuMcxoCzUFWWPK8Y55ZR7ihKy3B1yIW5JVb7Q667YS+33XMDGzc0iYUjlZJEB4ltoh2JDlBqJSSbuoLbrurwyadP8/VvPO+WlhZFt5MsHH3++DWP/dqR3tqyrutGHz16VIQGvvzVsjAfnDpwtRi/fJYTL3yDrUmL7qZr2D2bsrBieLncwza9m6Y7QxIF97tcxcSqou0tpp4yoqRnIpY4YZEiRnqYUgrjwKGIIs+mpEIoST8WtBy45R7l2aMkW+7AdDcQxy32RQt88+IEYz+FVBqtBV5LGt0m3Znr8Fdfj86HjOfPcvbUC5y58DKzCxfZPNmk2Z4MthAyhF5rw6APyuCYOzIlo1HGCtOY6b3E269Bb9hFM21gVQOBxdaQg7fhlAsfwqSVYREFMnTZnEV4h7PBU9tZR1k5KuspKk9VQV44eqtjlpZ7LMwtsHD+AlNbNnDHobu54bodJC0o8hFeKIwQDGyJwJM2EpqNFK0VQjsuDTMuDVPeevNu9mxoubyyelT5j/7Lv/0jq2vh+Q12woeOHLGHDx+W9/zIX/vUE7/2r59sduI7Jm/YbccvnVX9udcQ0YDWjusZrs5wcaUi7V7LzOJXccDMHfuZ2LKZ1S99Lczc9S50TWQUujo6NAplpLFVgbW2xpgdxihUu822t7+Z1S9/HX/+IuNzx0kOLKC709iJHWzuX8CNLzHIBSqOkLFGxxoba2xskHGEixske29g297rMINFylNPMnfm60znr9NNNFZrhI5C/9o7pDNUQtAXU4y23ka86RqSiW3YuI1RCiNccOVza+NufWhsWo9wYThGkIy40L+oB1M76zCVx1jCZNTSUxgY5gWDQU5vVDIeZwjpcVKyYe8urr/9AJt3zlLaMbpSCKEYlDlVVdBKYlrNGKUCvTYf56gkoZCSb7wyx607On73lmnZjWTekPL//lZm/pXKb3/wIEocEeYp8S9/Q0fxncvjwrd3X8/i6/PkZ+Z55uxezjenKdyA+WgLO+QG4mqe1WzARjWDtxV6z7W4wmIuvI5upMR7b8BkI+J2k/Er30RNzaAmNmCKjIld+1CNFvm5U4xfPhUcZYRmsDDHVG+OuHMd+eQuJvpzzLg+x+Y1cSN4SCfNhDiN0WlMHEeIOCZKE5JGTGN6MxOb34e+4U7SSy8w4y8wIcdEUiKswMaekepyot/CqT3Q2cnYB7xYVjmiyhBeICkpbGA0emsx3mIrh3d1KeMCAGKsx1mPsTac1NKQFZbROGM4LhhlBicgaqVMTE2zbc9WGq0Wp89fRCUxrZkJvC0xVcCcvbXk44xGI0Y1g192Nsy5sLxKkia0Jys6DNjfatFfXHbCOXUuH3/ljqv2nPxDZzYcPPig9f5B8YVf+qVfwy79Xbo7Ny9f9S7XbGyVT37mN/l0lpFcvcLendtQYooT6X52LS8x/fyrXDp1DpEVdHZeT7ptL5d+8x8Dlo33fT9zJ15j5robGSyv0pycYvJt38XquXNM3/1eVo4/g+otMH7yy6Syg9MNitUBdvk0YkeOaG2m2Uy5drLP118ZkHYE2hiyZICMU3SkEImkkbbwAuJYMLN1FtNukiabKHdvg+o0U/EcM2qAxHGpavHC6ynzzOLjSYrS4IseZjRAyhgVN8JEM2egCn1jW7cOnfVYEwCIqj6tRVGR5TnjccYor6hMhSNEm8ZEm81bZ5iYnKDZbdFsJcSxwMmE1TIPk9VU6NxVFVSFZTwYk2pJ3FIoHV7r7KkL4Dxbd0+gskX2TQk6ZgWhNJNCkcrs/13PMRR/4NQVIYR/5JFH9Dt/6qd6j/7Wb/3j6X33/uOXF5VtTL2J9m2rbHrsG5w68RIXfMXOvfsYXfNdvPjNPlf3nmerdsQell86yt477kPPbkL2lsnnLtJqRCw8+SW2Hnw3iy++iHOQL56jWjzP4vNfp9tfRaVTGOOIvMEWMJo/S8MO8I2N6HiK7ZvOki31KIutRHEDVXmkGAaHWqVZKi5x541d3vGet/CpLx1joTdJ2mkSd5qU0Q5M0SadXcb5ks++UHLRtNGJhuGQospIR/P8+ffexbOvXeTJl4dEsaLIDb7yGGPCdNOiJMsL8qKkrCryqsI7UdtAadJmg9mNU7TbbdrdJo1Wk6gZE6USLTVSa7RWxCqMHWq1NNYF2+GqCj7T+WCEKy2NqQZCh2Eki/OrLFxaYfv2zcTSsaHK2FQ4XDWwO/fsVMVg6bE917zpkbVE+Q8dq3Pw4EHrD3v58jv4N8denv8fUq32rcquS7fcI7/jHsfE8y/y6kmHrSQ7rtpAdOMHeeEbntHCi+ydgvL8+cA63HYd1dlP0X/xq2x99/fx8uf/PTPX/W1at2/GFxlm7hStqc1se9O7qF5+lNWTx0iEwEqNt5DNn2WiP0c5uxmbTrFnWjLdHfHa0jKRFEhvg6JOQZQ2yQYrHHjvTu69cxdPPH+ex5++SGdDl1a7STnZpJxKeX6wjVdffI0zyx6ROBisUHnB6sIyt2y0vPXOnYyrgo98/hW0bjAejSjLAmshiRQ6jtFpk0YzZipNSdsNGo0GaatBo9UgSRJULFBSopQIzAulEDpQI6wI/lxKGEqnw/BrAcI4Ku8o8pLR6pBYCYSPg5Nd7lk8v4C0FqIIX5Z0yx5ClF6nEba3Umph/5c/SLuvvw2Z2h8+/Ig6suHQ4Fe+OPc3Up18cuHisptfATXayt3XlDTPXeTps8dwfj9bd+4kuvH7OPpchey/ygbfo3/6PBve9UMsT3QZ9nq4pMHExs0sfPl32feX/wkLT38Ov3iObGGO1ZeeZfT6azRnZ/HLizilQFbkS0uYpePIyX2UyRa6ieSd9+whf3WCKGpgipyqqihNhSktclgxNT2Fdzm9UY9eXlKsjCnKAi8VImkw56HqzqKLEcOsoqoMtiqYv7TIcqQosxFJK6E70yVuTTLFLFGiSOMGcSslbaYkcTiFas1XS4RxPVLXAzVlsHASNf9rDUGxSKLaBUdKTVnW7UgnwmwnA+P+mCLLiVpJIKw4Sb8/ZHV5hSRNiYVDlmMoxlhZ2Mn2hJ4/9/qv7P/eH//qI48c1uLQA+aPNZzyyJFD9rD38i/Ap//uv3jy0cWl4uDi4kU7M9FVp1u3cd11p8iee47nT72Cs7B1+waat76f1178JAyP0fnSp4jThMkDtyBefI4LX/0C7UbM4NUnWPjKf8RfOoUeDbj4xKfY9ra3wx23Mfjm46x+6RMBVkRixxnjcy/T2n4HurWdSre5eZ/mBbEHpxooV9VW+o6V/pBxMmb77BTGwOz2zdzV3kukBUoJpI6QWCyOqc0bmdwoKCuDtQSrY+MpqwWyoWHLlmluf9MNiKgTqLsyeF16JxCiIpIFiRAoHewigndR6Epp4cIUNCdCe9IHkuEojtAuBlkha42X9wJjLM4IKgXCekxusKXHNUKr0ljPYHXEeJij6jkPLs+hHHmpSrEyP1otqf6B94clD+L+U6aPeh5EiCPC3/dTv/xXUtl4Yf+uHcy2E//N518Uv3fiBX7yzi6JusQz5z1z3rFj5w46t/8AZ174KPa5b9I7/hyNOGIycSS6wTiWNGLL8u/8IkI6Gg1H9fSnOfPMI6g0RitPHEXBmgmNq8ZkZ0/SvmEeObkDN7GTzdlZtnYFCzaqudAOKktvYGk1FZMTEcOxwThBsxWh68Z4cGIPehVjwvi5OJa1/UJE0kjJhyXZaEza7ZKmEicDpq2kQDhHp8q4rimZjixSlcGCUV3uPIUZhpZGo4GSgizLcc7TMxEv+iZDIWsulg22Sx6KwmAqkBooDVUZKMvCeKwxVMaEUUCj4LVdlYZKVRTZ0DY7Si+sLP/9O//a/37qkROH9aEjR8x/0njZI0eEe+ghrx54QBz7mV984ueSqPnTn/ydj5nW6Jz+4e++mZ0722yZe4nRN17n9HnD2WrI9h1bae1/F6dehKj/PN1JQZVUeG2JiamqiFhWeOswSJSERGXIKsOkHfTEFMXcBZAJOEm+eAG7/Dpy8gbU9D46l06xq9lncTxJrCM8VaC5WMNUO6bdViz0C8a5gPiyKfi6waaoJSm1+bh3Ai0FSaRYHQwZDUZMzk7RThUj6wOlFY8oM64Vq9x9zRbUxEQANBCg4+B36cNEViEjjr56ljx33HD1dtJUMF4ckp8d87xN8DUBwNUn3hpHPjboWCBMhbMOXRMIbWmoioqyKLGVwZYV+TgnS63zptLLvd4zVbn8rx566CF18P77LUeO/KePeH/gftz99z+kfviv3PkzX/ni7xyd1Sv6Z/7m99vvOngLjVTR3bWDH/nBQ/zED9zC++/bxm17KrbvSImuezPH5D6OLxuygaDKIC8EuREUFYjKolopfuMUyiqkFehr9jJz/3sQe7firEHJlHxYUMy/jrIZUXsbSqdsbyygpCWR9WgcqTBFyaaplE4zYXlsyF1tOlr3jMOiupr75euJLgRSnxCkScQgrxj0xnRiwWQa7lAZmLucfOUU7eGAaPMErjuFmt2MnN2CnJxGdhJUdxo9tYFRlPLRR57lQx/5Kp958mVEt026oc20EiE0E/rOzl22/a+KElu5MC6+HlxpqiosalGF+czGYI1hsNLzVjb9+YF10vifvOdv/3x2/9Gj/tvNDf6jB0SviX7vf4j9QhRvuffHfvIf/d2f/Oot+zf45YXTfnbbrEj8JtCejQ1JRIVngqp0rFzT5YWdMS99UVNdepEdztJoGpraoRNFJRxiosPMoTdx6bc/y2QJYjiCRKE7TXJnSYREFZ7s0hzNahXf2oBuddg8HjARZxivAsPCgq3GTHSayKjJeDxad+ZDqHVhtlyn5IjaXjgMkJbSk7baVA5Wez0iFRaccfi+YlzwyouvsZhuBa9QUvOVrz7HZx/5BrfcdC33vu12Hnr4k+Rlwfe+7yC33nwtC48+ga0lrhqFjhSq8FyOoQ7vLVEkyfOCViTBhDlT3ntsaamCuTeRUnjvKIuS3tKy2bFzRzQntxy55a//yLOHDz+ixZFD5g9bQv1HOWI9/PAD9pFHHtGHDh36+s2//ODfihn/vHamckUV5SJwm6UVWBVG8CBgdhLecfdONs+8j9/7Lc3owhNctUGgWzGRrBAzDWbuuI3Jm99EMTZkX/saHD3G/NISxfIQLSUGD1pTLK5A/wKqtRcxsZOJ5afY2qw4MVYIX2GoqPKSdpSCkowLgyI46XkdoVWg98YywVmDjjWmni+sdERlR6Fejhos51XoQEUe40M713qBK2GQFesK61dePckNN1/P0y+c5tipOYrcMjU9wUd+93G2zMxy36HbefxLz3Lw7hvZ0FVEviSyTQZShvGjPnCuOo2IYjymiptIJxE+EOyt8disosoLoihw1O04M7o9Gc29fvZz//Yf/vCRlOP6yJFD9o9aP/nHsT07dN995pHDh3Vn355/emnuzEdakYiKUc/YagyuROGDNYGSqCgCHVFhOXD1Zu78nndxtn07Ly/E9IeGUUkYKtmaQHrJljfdTnrNnqCGP7+ELixrrn9SxFQrq9jF4wg3IOrsphFrdieraJvhEVRe1n4UYSNXzuGjhFanw6njr/Haq2eQssHTTz1PsznJi8+/ynA5Y/HCKt98+kVajUnaEy0a7Q5ZZsBpcMEWIcwjEug0YZSNCWIiuOmm/Xz1q9+kcorpDTO8dvI08wvLWK/ZsWuKxx5/mihK6sNqiYRBuWqdxEc9dqDb7oJ1VHlZU4MCi9O6IBIoxxnCQRLHzjqUHa3OnTl55ieEEBy5rEDjT3SC12QcB8F573nt07/yPxZDeauOxd6yLG2qpLLSop1E6BAClZJYUkxWccO1HY7f+SZefTrCLz3NzdoRX1zkxIc/zG77/WBKLn3x67SjBCNlPa+ynpYiwRRj8vOv07pqBdo70WmLrbZPIjZgXBLUFULx8mvLvHZqxPKgAiP56u99nlMnzyJUyvLF05w4fo4YywsvvsSlLecpipxz833K/jJXXX8dM1u38LVnz3DP3T1WemOUSBAe4ljT6DRZGfXxzlCagjtuu5Ennj7B2fMXePfb3s0rzzzDj3zf2/nSl77KvW+6jZePncG6ipnpLna8Sio90ppgxhY4nQhf0WlHpIlkPBrTaTdCE8QH0l9VWcq8INL4qelpd2k4p0yR/cTv/fbfPH///Q+ph488YP84S6f4Y34deewx/+CBA2r2/T8y/IvvvffZNJI/LAUqSE29UFKhZFTrgC5bMkXCk7uE0/kUuWgzvnSeKZ3TEZZsaREGfeSlPlaryxNR1rxAfCC6i1jQ2bkf292FH/dgeI4T1Sz9MkE6y/KFi2ydmGbfDQc4tTrm61/5Gu99yy5u2j7F9lnNX3rgO5g/8yr/+994P6PFc3zP22/hln0ztFXOn/++N/F7v/cUndkdLMwtctOBA5wdWUqn0MqjI83SQg9//gzvOrAdvaGJ84Y777iOtx+6g+lug+9811vYONPizluvAW+447YbuPO2AwiTIQvH6OKYV4uUTCUIbOg82dC6XJhfYmmhT5o0kFikD7Ia5R1agFLStruTetxf+j8/85G/8f/ce/gR/al/+V77x103zX/Cl3jgAev9Q0qIBx5/4bf+r++bnpp42DmvXeWUk0o4qdcjvxSBLVEozY7tEzSen0fsO8hC1OT5i1/gZiqmzi8zXBrQEAnWsS7Avmxu7VFoRsuLuNXXERtvw3d30537BluTPqeHk6TK0Wok9PKc43OrDMeeVGR84L6baPuSzFhaDcU/+V9+mEZT8vf+x+8hjhIwJe++aw+djbN87vdeYVFG+Eabrzx7kmj7ljDLUoWse9O2zXzjq1/kP/zW7/HOd9+NbMrAZ9ZRUEsYh82r0C704EUETmLsmEGlmdMTjOO4FtwFyp2oxw1snJ3kzKvnKcs2UofSEREM3crcVq12FGXZ6s9+7j/+9Z+59/Aj+rE/xr37n73A4VQ+YP1TH4rEHT/1uy899A//xo6tm/51r6gqr/LIrXOeYrwMGh3vDd12G+1zLq2uMrX3Ti45y4uLX+a2aExbQ6lqb4tvgVO9MCgk5bAiv3icZPcisrsBp1P2yEs85beCUExummW4ssyxuXlI2lBVNY2lIlWCclQhhxllHiO1xg6GlJVFxwpXFlhXETdjrrrhOlYSzawyYV4lEu8t05u6bL3rLfzTJ5/i0698molOhyiKcSqMvbFWUBqPMRWldVTOUBpH4SzX3H4TV9+5OyShzmDWfKV94IZNTXVopoKsv0oyNY1xFq0czvtKxe1osLL8iY/96o/+9L33HtaP/REZ83+RBQYQd/xU9dSH/nJ03QN/70OvffTnrtqyafrv9Iuy8ogoEjKoTpXGqMCL7jCiZQeszPXx0T7a2+9grhywefB1ruk6BAYI7M0r7SKcUEFHZsaMLp6hMVxAT20la29lcnyB6XjAwG1kevsG0r27kIlgOMoxlaMZpVx66Sjp9Cypijnx2JeZ2DJDJGOyxRUMig1vvpXGJk1ZGVSk6aQJi4uLbN42S0mYqCa9I0oaHHjL3ey7+SbsKEOlSZgSo4NfpFv3GPM4ExbYlQ4nJdOzXUwUUDcbpv5grhCdNxoJGzfOcPyl1+k2IkhirHAmSjtRng2/rhn++P0PPaQeuv9+K8QR/qssMMAdP/VLJqgi/uefPvXJf8Kmqem/08urqgg2AALvkE5QeY11OXv9Geb6JZcutrHtiPvefBPXZCOK15+g25kC57CYQIetneJ0bQLjXEQxv4TtnUZOXI+e3Etr4Ti7GwOeybcQ6RbWV3grg2WDF2GA43BMJIeUSjPRaVKdmyeTisbMFOUgI2o0w+SYJOXVU3NcmHuNWzZ2eKUYc92bbmE8HtYqCEOqoD2dIjc06yh1ecCFqL26gqBpzcGutsK4YnS38g4vfD1i3qOFINaajVs28PpLr9FfWmbjxo1VFHejosy+1m1m7/7Er/xPA64+LMUDD/j/nHWS/Od/eTji/SOH9Z7v/ls/vbK0+rPTDR1RFphi7F2RY0uDNAVuaYWp/ineMjHH7t7TXMcJ7twy4Kqbr6O5cQvGFlfMT7hshOJq0XYkIopBn2r+VXy1hO7sQEUtdqWraFcEHlR92iMkIvJkpmRy8xZ68/NkJmPj7Tcxe8tN7Lj9dmYPXE+6dQtFliOVJ9ae1WOf49YNPYbj5QBEWHsFlTY4DlljMVWFs4G1YY3DGY81nsoGjrNxNvC1bGgqOBfsqJx33zLQU9TziwXdiRbbt2+g1180eSWiMh9/bbxq3vOJX/nJweHDXlKPa/+vvcBBAH/oiPUPPaS2fc/f+OkL84uHI1MZURVURWarPENWBb0zxzCrC2yLB3zH1FnuTE5izxzDjMZsufYWpEpw3gRXHVEPAEHUNvvBhMxU/5/2zjZGquqM4//nOefcO6+7yy4sLC8SEPEFBaNitE0LVKurjS3VLE2TGk0rpk3bVEM0NE07O8Q2tfbdxJpYk1r9UqY1JlWs8cNCxFptlIgFAgKCslJwWV5mZ2fm3nvO6Ydz7syu2rcAik3vl81O9mVynznnPPec5/n9DBpv74eoH4bNdkIWZqGPR1GQTd9W4pgizAwlJZRgHEIOzbMuQGP6fLxwcAxv5Lrwl+N1vHrcYKfoQM0I1GsGw7texY9um4ErryjiuXcYC5dciKgxPqnr0JJtwUWtRYtmN3GrGymJzrPCUghp6jixraZ0562QgiAlIQylnTZ7RtI9pVMeObTnCVN/p/+lP918olQqcblM5mRiJHGSFwEW7ex63Z7Kva90FXKPk5KqkdSTQGs5umM7skJCKMJUNJEcP4jR6BhMNA47ZSa2DCuc1yeR5WQC1HWirQRgIzB2eARd1YPgzkWQXXOQGTmAHj6G0UYWGaVhrXS6dwvklMILW3fj6Rd3ondqFy5fsgC7Dxx2sFfVwAt/fhnlu2/HL376G1xz7hjm9E3FHb/ai2tuXI3EJEhcqxImvps2dOxdjsUJBtD2lMytbYj0c2JaYHVKcXJgNibMZdDTN0f2HRq5b3Nl9d3DAIASl09i5J6yAL9fdr3nsXU3FvPhQx1ZMWN4644kPnRE5kMBLRJYBJCCIEwDtYMHcOzto6hWm9BTQyAQfl2z73lcUiDUj1cRHx0GzRwHd/SCbILpsopdyVRYKVpYB2ZCoxnh/PmzwCp0jzzNKs6bOxP5jiIazRj6xEI8+NjT6Gq+jJuuugTfeOB1zLr8ZhR7imjUY7df7ZEOltzW4kSZ5QR9VFsnRe1AM7U5Ww7EZlsfDGOsb48xSZjJSG0SXRfVezZXVn93WWlIbhpcrkFkTkVcTlmA0+x6aKgkz17xvSd3PVpaWt237xE+sOtTYZCYhBiCmYmsA4tKCUEWU0UDM84rIEkSaDOB/0wmNTzCwPcEN2JEh4eRXTAKZHoRKInOxjEoajM9jHU+obiRYNH8XixaOBusBBJtIYUCTIwgX0RTM/Y+dj/WfG0x1j28A7VpV2PR/Lmo1o6AOHDmllTv6puyhUc9aHhCj7WOBuQBZZigH7LwU7qxk3qNPSfEGmuTfGe3qp0Y22/N2NcfXvuxp5aV/KNQ+dTFhHGKrxUryoldPyAW3lw+cPadj1yVxGM/zIbE+UAxsU3IMTm9Ft1R9XRzHAxH1DFtmEJrgTPkDzOMRf3v+8D1o1BRE7v3n8Abx5znkK0rTk+SGFFTe59whKg+juZ4DYgjxPUa4riGKNb43aNP4uKF8/D4xlH88W9Z9M0/H7V6DRYMtrFDNEyQP6ZUP4OUyKsn4NLevyCKqa0daOuJjSYL6uzoUUnc2NCsjXz8J7ctfqpUGpKb/smh/Rkzgts7XhVdKpV4cBAgKn976+2XvpgL8PMpYTi3GkearSYNyekUqGEA7SCf7Pt208QmnaJBEoBEPDKCsb3b8OAzm3HEzkJu3hyQjZAYAQOBOB4H2QgRmsgmEZgz7hHMxE6sHQrs2zuMzs5ubNjyFhaeswCf6e/FoROj6Jk202XFfnRaayHTlhTyr6dcbHI1VYKoxeAkTwtwj0TuDFi34UzWGqODTE7GUaRrY6P3rL1h7iAADKy3oryKktMRi9MSYFcRUjblMjBUWiYXlzc9MfTFSzdP7w7vi7njVoYGuJEYIiFIkFO+Wkjr0IZg64XOLv108FDXTSCbElte3o9X3pmJGUuucEBQWAibAImj7kVRgjBfQD4otLYFrXH1WyII0dkhUCwCq/tvwvJlS7Dmngogp7jz2JS/aSewOK2FTVVyk/oGaIJtnCZp5u3krwkLITMdU2R9rPpSFNe/ufaGs18qlSwDgyivIn264kD4AC47MCCoUtEAcNd1n1s50ghLkuXFiY4QiGaiJEQomDIMSCGRVw0oJZGVFkoSMlIgCwtWIZqUwxa1CGPTL0GQdSUzgh13QzMhCEK89uLzWDyvC1deNA9JbPzmvvbcTQKrEJlCFpmcwM4dw9jw191YuvxqBNIXARBN8g8DvirEB9F6kTWn3gRXHuK50m4NFg7ArS2RyHZ0ozFePWotvn/02Mj95VUXRqUhK8srTs+o/cAD7PMUwqoBdoFek1+6tPlVIfQaEYR9zajhXOKu7YKEfxZmeOGVJIhAotjdi0z3dBRmzERQzLuCOBaQnoFl2UJKAaYQ+17fg1p1FIlwaCWtdUvvKtiZxcHOf3zu+QuQyQTQOnGoYOKWVcYweWMoICklA7iAsnE4VAjACJ91u2zKCEOUy3dyFDUSy/xwok/8eE3/ObsBoGQtl09RlnzGBDi91g8MiC9UKtoC6O+/bXZsur8DS7dIGWS1jmCM1p7xz9aVNUJJhTDXgUL3NOSndiMs5AEpncwSFsQKzOS66mUGLAyy2QwMK59FUgvTQEgVtg4aLgQjihrQiXajlDFJ/mX9h4KshfDfW8+YFp56bwmw5JgAzEKEuTxsogFrnzU6WnfH9XM3A4Aftfo/Oaj/yAY4/b/LlpXEpk0ua7z22rvOpSB3J1h8Xsig1+oYOmkagA0pKYJsjsJCFzIdHch2dkGqwGencMV16ZQpHfCM0xsP68jr3ngKz+Ngj0rW7PAOkqgFACcI/3NtQDj5HAH0HvlGivOAUqEInFC6zsSbWYn77uif9awL7JDExo3mVGxcfFQC3NoAHBhYxRW/Pq9c+YMeHdCtlvhWIdSFUobuHiphwkLRqFxeqEyOWLiaZErNZ5xS49Hq5me/JkJwmypL7I1hqR7HlQcpJq9/5bZsKw2mTf9m65HIkvMMgYUQQTYHwRJx3HgLoA1BqH5253Wzd/pkiwYB+qCm4zMwwP4qlXhg+3ZKA10qlXjr7p7rWIqVrOQ1YaFwlsrkwYoBywZMhpUiFoKJCIKZ0oMKhz1206orOnAqHOs6wIEWK9p6ILhjXsFaB2dJtyAJECCQsZaIjHvZMFiwzBbALNBojNWIaJOU8g/FPH7/resXnnDv3/L2RRWqrFqlP+xbe2YEeNKIrnCl0r4xX1rz27xt6uVWqJuElP2ZoNinwiwMuwZsfzCh2ZHsyLkMma3faBB+iraegcVCoMXOaR0YaA/+thZElt2vQwCCSEAGIaRU0DpGEjerYPUcET3RROOZe2+57M1WfrHeim3bYE/2gOB/OMDt9zUwsJ7Tst30xc9++dfF7q6ei2D1MjB/kpguYuZepbKKhPMwMJHT33klHqXTdpr5crpOT5Svu41lIQOHQfRopbg5DlhbJdBrIqM2CaLnFalXy7cvOdCafKxlDG7kwcHl+l8VoP8/wP9mVB++YBu9eytv4CsPdXdM6Z2d1GufMIJmCZZXwJqiYL4MRBZSUEuRy+wL3t+1zrqDACuEJGvNXhlk9us4fkPlclviJN7OFO3+5dpPvzl5RbEMbGTgw0mc/pvrH60N6xgKxAHZAAAAAElFTkSuQmCC" alt="น้องจดจิ"></div>
+    SHOPEE Live Analytics
+  </div>
+  <div class="topbar-right">
+    <select id="channelSelect" class="select-styled" onchange="switchChannel()" style="background:rgba(255,255,255,0.95);border:none;font-weight:600;color:var(--orange)"></select>
+    <span class="topbar-badge" id="lastUpdate">กำลังโหลด...</span>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">ภาพรวม</div>
+      <button class="nav-item active" onclick="setPage('overview')">
+        <span class="nav-icon">📊</span> ยอดขายรายเดือน
+      </button>
+      <button class="nav-item" onclick="setPage('mom')">
+        <span class="nav-icon">📈</span> เปรียบเทียบ MoM
+      </button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">วิเคราะห์</div>
+      <button class="nav-item" onclick="setPage('organic')">
+        <span class="nav-icon">🌱</span> ยอด Organic
+      </button>
+      <button class="nav-item" onclick="setPage('hourly')">
+        <span class="nav-icon">⏰</span> ช่วงเวลาขายดี
+      </button>
+      <button class="nav-item" onclick="setPage('campaign')">
+        <span class="nav-icon">🎯</span> วันแคมเปญ
+      </button>
+      <button class="nav-item" onclick="setPage('hosts')">
+        <span class="nav-icon">👥</span> ผลงานทีมไลฟ์
+      </button>
+      <button class="nav-item" onclick="setPage('ads')">
+        <span class="nav-icon">📣</span> ค่าแอด & ROAS
+      </button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">ตั้งค่า</div>
+      <button class="nav-item" onclick="setPage('import')">
+        <span class="nav-icon">⚙️</span> ตั้งค่า Channels
+      </button>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ====== PAGE: OVERVIEW ====== -->
+    <div id="page-overview" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ยอดขายรายเดือน</div>
+          <div class="page-sub">ช่อง 729flux • Shopee Live</div>
+        </div>
+        <div class="controls">
+          <select class="select-styled" id="monthFilter" onchange="filterMonth()">
+            <option value="all">ทุกเดือน</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- KPI STRIP -->
+      <div class="kpi-strip" id="kpiStrip">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- CHART: ยอดขายรายเดือน -->
+      <div class="chart-grid single" style="margin-bottom:16px">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายสะสมรายเดือน</div>
+              <div class="card-sub">เปรียบเทียบ มี.ค. / เม.ย. / พ.ค.</div>
+            </div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>ยอดขาย (฿)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>คำสั่งซื้อ</span>
+          </div>
+          <div class="chart-wrap" style="height:260px">
+            <canvas id="chartMonthly" role="img" aria-label="ยอดขายรายเดือน มีนาคม เมษายน พฤษภาคม">ยอดขาย มี.ค. ~90K, เม.ย. ~850K, พ.ค. ~850K</canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHART: Daily trend -->
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายรายวัน (trend)</div>
+              <div class="card-sub">เน้นดูวันที่ยอดพุ่งผิดปกติ</div>
+            </div>
+            <select class="select-styled" id="dailyMonthFilter" onchange="initOverviewCharts()" style="font-size:12px"></select>
+          </div>
+          <div class="chart-wrap" style="height:200px">
+            <canvas id="chartDaily" role="img" aria-label="ยอดขายรายวัน">กราฟเส้น trend ยอดขายรายวัน</canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: MoM ====== -->
+    <div id="page-mom" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">เปรียบเทียบ Month-over-Month</div>
+          <div class="page-sub">วัดการเติบโตเทียบเดือนก่อนหน้า</div>
+        </div>
+        <div class="controls">
+          <select class="select-styled" id="momCountFilter" onchange="initMoMCharts()">
+            <option value="3">เทียบ 3 เดือนล่าสุด</option>
+            <option value="6">เทียบ 6 เดือนล่าสุด</option>
+            <option value="12">เทียบ 12 เดือนล่าสุด</option>
+            <option value="all">เทียบทั้งหมด</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mom-grid">
+        <div class="mom-card">
+          <div class="mom-month">มีนาคม 2569</div>
+          <div class="mom-main">฿90,754</div>
+          <div class="mom-sub">8 sessions • 8 วันไลฟ์</div>
+          <div class="mom-change-badge tag-gray">เดือนแรก</div>
+        </div>
+        <div class="mom-card">
+          <div class="mom-month">เมษายน 2569</div>
+          <div class="mom-main">฿853,699</div>
+          <div class="mom-sub">14 sessions • 23 วันไลฟ์</div>
+          <div class="mom-change-badge tag-green">▲ +840% จากมี.ค.</div>
+        </div>
+        <div class="mom-card current">
+          <div class="mom-month">พฤษภาคม 2569 🔥</div>
+          <div class="mom-main">฿850,454</div>
+          <div class="mom-sub">11 sessions • ~23 วัน</div>
+          <div class="mom-change-badge tag-orange">▲ +0.4% vs เม.ย.</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ยอดขาย MoM</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartMoM" role="img" aria-label="เปรียบเทียบยอดขาย MoM">มี.ค. 90K, เม.ย. 853K, พ.ค. 850K</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">คำสั่งซื้อ MoM</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartMoMOrders" role="img" aria-label="เปรียบเทียบคำสั่งซื้อ MoM">Orders ต่อเดือน</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">🚀</div>
+          <div class="insight-text">
+            <div class="label">การเติบโตสูงสุด</div>
+            <div class="value">+840% มี.ค.→เม.ย.</div>
+            <div class="desc">เดือนแรกที่ไลฟ์ครบจริง ยอดพุ่งจากการ scale ทีมและ campaign</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">✅</div>
+          <div class="insight-text">
+            <div class="label">ความสม่ำเสมอ พ.ค.</div>
+            <div class="value">รักษายอดได้เกือบเท่า</div>
+            <div class="desc">พ.ค. ทำได้ ฿850K เทียบ เม.ย. ฿853K — แสดงว่า momentum คงตัว</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">🎯</div>
+          <div class="insight-text">
+            <div class="label">เป้าหมาย มิ.ย.</div>
+            <div class="value">฿1,000,000+</div>
+            <div class="desc">ต้องการ +17.6% growth ด้วย 6.6 double day เป็นโอกาสทอง</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: HOURLY ====== -->
+    <div id="page-hourly" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ช่วงเวลาขายดี</div>
+          <div class="page-sub">วิเคราะห์ pattern รายชั่วโมง จาก session ทั้งหมด</div>
+        </div>
+      </div>
+
+      <!-- Summary KPIs -->
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)">
+        <div class="kpi-card">
+          <div class="kpi-emoji">🌙</div>
+          <div class="kpi-label">ดึก 00-06</div>
+          <div class="kpi-value">฿358K</div>
+          <div class="kpi-change up">ROAS 49x ดีที่สุด</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-emoji">☀️</div>
+          <div class="kpi-label">เช้า 06-12</div>
+          <div class="kpi-value">฿389K</div>
+          <div class="kpi-change neutral">ROAS 35x</div>
+        </div>
+        <div class="kpi-card gold">
+          <div class="kpi-emoji">🌤️</div>
+          <div class="kpi-label">เที่ยง-บ่าย 12-18</div>
+          <div class="kpi-value">฿499K</div>
+          <div class="kpi-change neutral">ROAS 24x</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-emoji">🔥</div>
+          <div class="kpi-label">เย็น 18-24</div>
+          <div class="kpi-value">฿549K</div>
+          <div class="kpi-change up">PEAK SALES</div>
+        </div>
+      </div>
+
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ยอดขายเฉลี่ยแยกรายชั่วโมง</div>
+              <div class="card-sub">สีเข้ม = peak / สีอ่อน = ต่ำ</div>
+            </div>
+          </div>
+          <div class="chart-wrap" style="height:240px">
+            <canvas id="chartHourly" role="img" aria-label="ยอดขายรายชั่วโมง 0-23 น.">กราฟยอดขายรายชั่วโมง</canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Heatmap -->
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Heatmap ยอดขาย — วันในสัปดาห์ × ชั่วโมง</div>
+            <div class="card-sub">สีเข้ม = ยอดขายสูง</div>
+          </div>
+        </div>
+        <div class="heatmap-wrap">
+          <table class="heatmap" id="heatmapTable"></table>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">⚡</div>
+          <div class="insight-text">
+            <div class="label">ชั่วโมง peak ที่สุด</div>
+            <div class="value">22:00 – 23:00</div>
+            <div class="desc">ยอดพุ่งแรงสุดทุกวัน — schedule promotion / flash sale ช่วงนี้</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">💡</div>
+          <div class="insight-text">
+            <div class="label">Hidden gem (ROAS สูง)</div>
+            <div class="value">01:00 – 03:00</div>
+            <div class="desc">ค่าแอดถูกมาก ROAS > 100x บางชั่วโมง — ทดสอบ Retargeting ช่วงนี้</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">📅</div>
+          <div class="insight-text">
+            <div class="label">วันขายดีที่สุด</div>
+            <div class="value">อาทิตย์ & เสาร์</div>
+            <div class="desc">Weekend ยอดเฉลี่ยสูงกว่าวันธรรมดา ~30% — เพิ่ม session weekend</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: CAMPAIGN ====== -->
+    <div id="page-campaign" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">วันแคมเปญ & วันพิเศษ</div>
+          <div class="page-sub">Double Day / Payday / Midmonth เทียบวันปกติ</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ยอดขายแยกตามประเภทวัน</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>Double Day</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>Payday</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#C97D00"></span>ปลาย/ต้นเดือน</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#9B9B9B"></span>วันปกติ</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartCampaign" role="img" aria-label="ยอดขายแยกตามประเภทวัน">Double Day สูงสุด, ปกติต่ำสุด</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">สัดส่วนยอดขายแต่ละประเภท</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartCampaignPie" role="img" aria-label="สัดส่วนยอดขายแต่ละประเภทวัน">Pie chart สัดส่วนยอด</canvas>
+          </div>
+          <div id="campaignPieLegend" style="margin-top:14px;margin-bottom:0;display:grid;grid-template-columns:repeat(2,1fr);gap:8px 16px"></div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <div><div class="card-title">Timeline วันพิเศษ — ยอดขายต่อ session</div></div>
+        </div>
+        <div class="chart-wrap" style="height:200px">
+          <canvas id="chartCampaignBar" role="img" aria-label="ยอดขายแต่ละวันแคมเปญ">แท่งเปรียบเทียบวันแคมเปญแต่ละวัน</canvas>
+        </div>
+      </div>
+
+      <!-- Campaign Table -->
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:16px">ผลวันแคมเปญทั้งหมด</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr>
+              <th>วัน</th><th>ประเภท</th><th>ยอดขาย</th><th>vs ปกติ</th><th>หมายเหตุ</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>4 เม.ย. (4.4)</td><td><span class="tag tag-orange">Double Day</span></td><td>฿163,660</td><td><span class="tag tag-green">+650%</span></td><td>ยอดสูงสุดขณะนั้น</td></tr>
+              <tr><td>5 พ.ค. (5.5)</td><td><span class="tag tag-orange">Double Day</span></td><td>฿205,907</td><td><span class="tag tag-green">+800%</span></td><td>ยอดสูงสุดในข้อมูลทั้งหมด</td></tr>
+              <tr><td>25 เม.ย. (payday)</td><td><span class="tag tag-gold">Payday</span></td><td>฿46,643</td><td><span class="tag tag-green">+90%</span></td><td>ดีกว่าวันธรรมดา</td></tr>
+              <tr><td>28-30 เม.ย.</td><td><span class="tag tag-gold">สิ้นเดือน</span></td><td>฿51,305</td><td><span class="tag tag-green">+110%</span></td><td>เงินเดือนรัฐออก</td></tr>
+              <tr><td>15 พ.ค. (midmonth)</td><td><span class="tag tag-gray">Midmonth</span></td><td>฿3,010</td><td><span class="tag tag-red">-85%</span></td><td>Session สั้น ไม่ push promo</td></tr>
+              <tr><td>วันปกติ (เฉลี่ย)</td><td><span class="tag tag-gray">ปกติ</span></td><td>฿18,000-25,000</td><td>—</td><td>base line</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: HOSTS ====== -->
+    <div id="page-hosts" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ผลงานทีมไลฟ์</div>
+          <div class="page-sub">Top 5 ประสิทธิภาพแยกตาม host</div>
+        </div>
+        <div class="controls">
+          <select class="select-styled" id="hostMonthFilter" onchange="initHostCharts()">
+            <option value="all">ทุกเดือน (สะสม)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">Top 5 ยอดขายสะสม</div></div>
+          </div>
+          <div class="chart-wrap" style="height:280px">
+            <canvas id="chartHosts" role="img" aria-label="ยอดขายแยก host">กราฟ bar แนวนอน host ranking</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">สัดส่วนยอดขาย Top 5</div></div>
+          </div>
+          <div class="chart-wrap" style="height:280px">
+            <canvas id="chartHostPie" role="img" aria-label="pie สัดส่วนแต่ละ host">Pie chart สัดส่วน host</canvas>
+          </div>
+          <div id="hostPieLegend" style="margin-top:14px;margin-bottom:0;display:grid;grid-template-columns:repeat(2,1fr);gap:8px 16px"></div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:0">
+        <div class="card-title" style="margin-bottom:16px">🏆 Top 5 Leaderboard</div>
+        <table class="data-table">
+          <thead><tr>
+            <th>อันดับ</th><th>ชื่อ</th><th>ยอดขายสะสม</th><th>ชั่วโมงไลฟ์</th><th>เฉลี่ย/ชม.</th><th>ช่วงทำได้ดี</th>
+          </tr></thead>
+          <tbody id="hostTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: ADS ====== -->
+    <div id="page-ads" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ค่าแอด & ROAS</div>
+          <div class="page-sub">วิเคราะห์ประสิทธิภาพการยิงแอด</div>
+        </div>
+      </div>
+
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)">
+        <div class="kpi-card">
+          <div class="kpi-label">ค่าแอดรวม</div>
+          <div class="kpi-value">฿60.6K</div>
+          <div class="kpi-change neutral">ทุก session</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">ROAS รวม</div>
+          <div class="kpi-value">578x</div>
+          <div class="kpi-change up">ยอดขาย/แอด</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">ROAS ดีที่สุด</div>
+          <div class="kpi-value">1,412x</div>
+          <div class="kpi-change up">10 เม.ย. 17:00</div>
+        </div>
+        <div class="kpi-card gold">
+          <div class="kpi-label">เฉลี่ยต่อ session</div>
+          <div class="kpi-value">฿1,380</div>
+          <div class="kpi-change neutral">ค่าแอด/session</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ค่าแอด vs ยอดขาย รายเดือน</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>ยอดขาย</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#C97D00"></span>ค่าแอด</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartAds" role="img" aria-label="ค่าแอด vs ยอดขาย">เปรียบเทียบค่าแอดกับยอดขาย</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">ROAS แยกช่วงเวลา</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartROAS" role="img" aria-label="ROAS แยกช่วงเวลา">ROAS 4 ช่วงเวลา</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row">
+        <div class="insight-card">
+          <div class="insight-icon orange">💰</div>
+          <div class="insight-text">
+            <div class="label">กลยุทธ์แนะนำ</div>
+            <div class="value">เพิ่มแอดช่วงดึก</div>
+            <div class="desc">ROAS 49x ดีที่สุด ค่าแอดถูก — ทดลองเพิ่ม budget 20-30% ช่วง 01-04 น.</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon green">✂️</div>
+          <div class="insight-text">
+            <div class="label">ลด</div>
+            <div class="value">ช่วงเที่ยง-บ่าย</div>
+            <div class="desc">ROAS 24x ต่ำสุด ค่าแอดแพงสุด — ใช้ Retargeting เท่านั้น ไม่ scale Cold</div>
+          </div>
+        </div>
+        <div class="insight-card">
+          <div class="insight-icon gold">📊</div>
+          <div class="insight-text">
+            <div class="label">ต้องระวัง</div>
+            <div class="value">Break-even ROAS</div>
+            <div class="desc">ต้องรู้ margin ของสินค้าก่อนจึงจะรู้ว่า ROAS เท่าไหร่ถึงคุ้มจริง</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: ORGANIC ====== -->
+    <div id="page-organic" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ยอด Organic</div>
+          <div class="page-sub">วัด Channel Performance — organic สูง = ช่องกำลังติด</div>
+        </div>
+        <div class="controls">
+          <select class="select-styled" id="orgMonthFilter" onchange="initOrganicCharts()"></select>
+        </div>
+      </div>
+
+      <!-- Health score as a wide insight card -->
+      <div class="chart-card" style="margin-bottom:16px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+        <div style="flex-shrink:0;text-align:center">
+          <div style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:8px">Channel Score</div>
+          <div style="position:relative;width:92px;height:92px">
+            <svg viewBox="0 0 100 100" width="92" height="92" style="transform:rotate(-90deg)">
+              <circle cx="50" cy="50" r="40" fill="none" stroke="var(--orange-pale)" stroke-width="8"/>
+              <circle id="orgHealthRing" cx="50" cy="50" r="40" fill="none" stroke="var(--orange)" stroke-width="8" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="transition:stroke-dashoffset .8s ease"/>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+              <div id="orgHealthNum" style="font-family:'Prompt',sans-serif;font-size:26px;font-weight:700;color:var(--orange)">—</div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:240px">
+          <div class="card-sub" style="margin-bottom:4px">สถานะช่อง</div>
+          <div id="orgHealthVerdict" class="card-title" style="font-size:16px;margin-bottom:8px">กำลังโหลด...</div>
+          <div style="font-size:12.5px;color:var(--text2);line-height:1.65">
+            <strong>วิธีคำนวณ:</strong> เฉลี่ย % organic ของเดือนที่แสดง บวกกับ trend การเปลี่ยนแปลงจากเดือนก่อนหน้า (×2) แล้วจำกัดไม่ให้เกิน 100 คะแนน — ยิ่ง organic เพิ่มต่อเนื่อง คะแนนยิ่งสูง
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-strip" style="grid-template-columns: repeat(4,1fr)" id="kpiOrganic"></div>
+
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">Organic vs Paid รายเดือน</div><div class="card-sub">ยิ่ง organic สูงขึ้น = ช่องยิ่งแข็งแกร่ง</div></div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#0F9B6A"></span>Organic</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#EE4D2D"></span>Paid (Ad)</span>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartOrgBar" role="img" aria-label="Organic vs Paid รายเดือน">Organic vs Paid bar chart</canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">% Organic Trend</div><div class="card-sub">เส้นควรขึ้นต่อเนื่อง</div></div>
+          </div>
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartOrgTrend" role="img" aria-label="แนวโน้ม % Organic">Organic % trend line</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-grid single">
+        <div class="chart-card">
+          <div class="card-header">
+            <div><div class="card-title">% Organic แยกรายชั่วโมง</div><div class="card-sub">ชั่วโมงไหน organic สูง = ลด paid ได้</div></div>
+          </div>
+          <div class="chart-wrap" style="height:200px">
+            <canvas id="chartOrgHour" role="img" aria-label="Organic แยกรายชั่วโมง">Organic % by hour</canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-row" id="orgInsights"></div>
+
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:16px">รายละเอียด Organic vs Paid รายเดือน</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr><th>เดือน</th><th>ยอด Organic</th><th>ยอด Paid</th><th>% Organic</th><th>สถานะ</th></tr></thead>
+            <tbody id="orgTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== PAGE: IMPORT ====== -->
+    <div id="page-import" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">ตั้งค่า Channels</div>
+          <div class="page-sub">เชื่อมต่อ Google Sheet ของแต่ละช่อง — เพิ่มได้ไม่จำกัด</div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:14px">รายการช่อง</div>
+        <div id="channelInputList" style="display:flex;flex-direction:column;gap:10px"></div>
+        <button class="btn-primary" style="margin-top:14px;background:var(--white);color:var(--orange);border:1.5px dashed var(--border)" onclick="addChannelRow()">+ เพิ่มช่อง</button>
+        <div class="divider"></div>
+        <button class="btn-primary" onclick="saveChannelsAndLoad()">✅ บันทึกและโหลดข้อมูล</button>
+        <div id="setupStatusMsg" style="font-size:13px;margin-top:10px;color:var(--text3)"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-title" style="margin-bottom:14px">วิธีหา Sheet ID</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          เปิด Google Sheet ของช่อง → ดู URL → Sheet ID คือส่วนที่อยู่ระหว่าง <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/d/</code> และ <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/edit</code><br>
+          ตัวอย่าง: <span style="color:var(--text3)">docs.google.com/spreadsheets/d/<strong>1qYnD1d...FFo8</strong>/edit</span><br><br>
+          ⚠️ ต้องตั้งค่า Sheet เป็น "Anyone with the link can view" ก่อนใช้งาน
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+/* ==================== STATE & API ==================== */
+const LS_CHANNELS = "flux_channels_v3";
+let channelsCfg = JSON.parse(localStorage.getItem(LS_CHANNELS) || "[]");
+let activeChannelKey = "all";
+let RAW = null; // raw API response: { channels:[...], combined:{...} }
+
+let DATA = {
+  monthly: { labels: [], sales: [], orders: [], adSpend: [] },
+  daily:   { dates: [], sales: [] },
+  hourly:  { avg: [] },
+  hosts:   [],
+  organic: { monthly: [], hourly: [], score: 0, label: "", color: "orange" },
+};
+
+const COLORS = {
+  orange: '#EE4D2D',
+  orangeLight: '#FF7337',
+  orangePale: 'rgba(238,77,45,0.12)',
+  green: '#0F9B6A',
+  gold: '#C97D00',
+  gray: '#9B9B9B',
+  red: '#D42020',
+};
+
+const MONTH_TH = {"01":"ม.ค.","02":"ก.พ.","03":"มี.ค.","04":"เม.ย.","05":"พ.ค.","06":"มิ.ย.","07":"ก.ค.","08":"ส.ค.","09":"ก.ย.","10":"ต.ค.","11":"พ.ย.","12":"ธ.ค."};
+
+document.addEventListener("DOMContentLoaded", () => {
+  buildChannelSelectorUI();
+  renderChannelInputRows();
+  loadAllData();
 });
 
-app.get('/', (req, res) => res.send('LINE Bot is running!'));
+/* ==================== FETCH ==================== */
+async function loadAllData() {
+  const sheetIds = channelsCfg.map(c => c.sheetId).filter(Boolean);
+  document.getElementById("lastUpdate").textContent = "กำลังโหลด...";
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  if (!sheetIds.length) {
+    RAW = buildDemoRaw();
+    mapActiveChannelToData();
+    refreshCurrentPage();
+    document.getElementById("lastUpdate").textContent = "Demo data — ยังไม่เชื่อม Sheet";
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/data?channels=${sheetIds.join(",")}&t=${Date.now()}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    RAW = json;
+    (RAW.channels||[]).forEach(ch => {
+      const cfg = channelsCfg.find(c => c.sheetId === ch.sheetId);
+      if (cfg) ch.channelName = cfg.name;
+    });
+    if (RAW.combined) RAW.combined.channelName = "รวมทุกช่อง";
+    const d = new Date(RAW.lastUpdated || Date.now());
+    document.getElementById("lastUpdate").textContent = "อัพเดต " + d.toLocaleString("th-TH",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"short"});
+  } catch(e) {
+    RAW = buildDemoRaw();
+    document.getElementById("lastUpdate").textContent = "⚠️ ใช้ demo (" + e.message + ")";
+  }
+
+  buildChannelSelectorUI();
+  mapActiveChannelToData();
+  refreshCurrentPage();
+}
+
+function getActivePage() {
+  const active = document.querySelector('.nav-item.active');
+  if (!active) return 'overview';
+  const m = active.getAttribute('onclick').match(/setPage\('(\w+)'\)/);
+  return m ? m[1] : 'overview';
+}
+
+function refreshCurrentPage() {
+  const page = getActivePage();
+  renderKPIs(document.getElementById('monthFilter') ? document.getElementById('monthFilter').value : 'all');
+  initChartsForPage(page);
+}
+
+/* ==================== CHANNEL SELECTOR ==================== */
+function buildChannelSelectorUI() {
+  const sel = document.getElementById("channelSelect");
+  if (!sel) return;
+  sel.innerHTML = "";
+  const chans = RAW ? (RAW.channels||[]) : [];
+  if (chans.length > 1) {
+    const o = document.createElement("option"); o.value = "all"; o.textContent = "🔀 รวมทุกช่อง"; sel.appendChild(o);
+  }
+  chans.forEach(ch => {
+    const o = document.createElement("option"); o.value = ch.sheetId; o.textContent = "📺 " + (ch.channelName||"ช่อง"); sel.appendChild(o);
+  });
+  if (!chans.length) {
+    const o = document.createElement("option"); o.value = "all"; o.textContent = "📺 729flux (demo)"; sel.appendChild(o);
+  }
+  if ([...sel.options].some(o=>o.value===activeChannelKey)) sel.value = activeChannelKey;
+  else activeChannelKey = sel.value;
+}
+
+function switchChannel() {
+  activeChannelKey = document.getElementById("channelSelect").value;
+  mapActiveChannelToData();
+  refreshCurrentPage();
+}
+
+function getActiveChannelData() {
+  if (!RAW) return null;
+  if (activeChannelKey === "all") return RAW.combined || (RAW.channels||[])[0];
+  return (RAW.channels||[]).find(c => c.sheetId === activeChannelKey) || RAW.combined;
+}
+
+/* ==================== MAP API DATA -> DATA (same shape as before) ==================== */
+function mapActiveChannelToData() {
+  const d = getActiveChannelData();
+  if (!d) return;
+
+  const monthly = d.monthly || [];
+  DATA.monthly = {
+    labels:  monthly.map(m => m.label + " 69"),
+    sales:   monthly.map(m => m.sales),
+    orders:  monthly.map(m => m.orders),
+    adSpend: monthly.map(m => m.adSpend),
+    roas:    monthly.map(m => m.roas),
+    months:  monthly.map(m => m.month),
+  };
+
+  const daily = d.daily || [];
+  DATA.daily = {
+    dates:  daily.map(x => x.date.slice(5).replace("-", "/")),
+    sales:  daily.map(x => x.sales),
+    months: daily.map(x => x.date.slice(0,7)), // YYYY-MM, used for the month filter dropdown
+  };
+
+  const hourly = d.hourly || [];
+  DATA.hourly = { avg: hourly.map(h => h.avgSales), roas: hourly.map(h=>h.avgRoas) };
+
+  // hosts now comes as { all: [...], byMonth: [{month, hosts:[...]}] } from the backend
+  const hostsRaw = d.hosts || { all: [], byMonth: [] };
+  const mapHostArr = arr => (arr||[]).filter(h=>h.name && h.name !== "ไม่ระบุ").map(h => ({
+    name: h.name, gmv: h.sales, hours: h.hours || 1, best: h.best || "—",
+  }));
+  DATA.hostsAll = mapHostArr(hostsRaw.all);
+  DATA.hostsByMonth = (hostsRaw.byMonth||[]).map(m => ({ month: m.month, hosts: mapHostArr(m.hosts) }));
+  DATA.hosts = DATA.hostsAll; // default view = all-time, kept for backward compatibility
+
+  const org = d.organic || {};
+  DATA.organic = {
+    monthly: org.monthly || [],
+    hourly:  org.hourly || [],
+    score:   org.channelHealthScore || 0,
+    label:   org.healthLabel || "ยังไม่มีข้อมูล organic",
+    color:   org.healthColor || "gray",
+  };
+
+  rebuildMonthFilterOptions();
+}
+
+function rebuildMonthFilterOptions() {
+  const sel = document.getElementById('monthFilter');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="all">ทุกเดือน</option>';
+  (DATA.monthly.months||[]).forEach((m,i) => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = DATA.monthly.labels[i];
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function populateDailyMonthFilter() {
+  const sel = document.getElementById('dailyMonthFilter');
+  if (!sel) return;
+  const cur = sel.value;
+  const months = (DATA.monthly.months || []).slice(); // chronological, oldest -> newest
+  sel.innerHTML = '<option value="all">ทุกเดือน</option>' +
+    months.map((m,i) => `<option value="${m}">${DATA.monthly.labels[i]}</option>`).join('');
+  if (cur && [...sel.options].some(o=>o.value===cur)) {
+    sel.value = cur; // keep the user's previous choice across refreshes
+  } else if (months.length) {
+    sel.value = months[months.length-1]; // default: latest month
+  }
+}
+</script>
+<script>
+/* ==================== NAV ==================== */
+function setPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (id === 'overview') renderKPIs(document.getElementById('monthFilter') ? document.getElementById('monthFilter').value : 'all');
+  initChartsForPage(id);
+}
+
+/* ==================== KPI STRIP ==================== */
+function renderKPIs(monthVal) {
+  const strip = document.getElementById('kpiStrip');
+  if (!strip) return;
+  const months = DATA.monthly.months || [];
+  let totalSales, salesChange, totalOrders, totalAd, idx;
+
+  if (!monthVal || monthVal === 'all') {
+    totalSales  = DATA.monthly.sales.reduce((a,b)=>a+b,0);
+    totalOrders = DATA.monthly.orders.reduce((a,b)=>a+b,0);
+    totalAd     = DATA.monthly.adSpend.reduce((a,b)=>a+b,0);
+    salesChange = null;
+  } else {
+    idx = months.indexOf(monthVal);
+    totalSales  = DATA.monthly.sales[idx]||0;
+    totalOrders = DATA.monthly.orders[idx]||0;
+    totalAd     = DATA.monthly.adSpend[idx]||0;
+    const prev  = DATA.monthly.sales[idx-1];
+    salesChange = (idx>0 && prev>0) ? ((totalSales-prev)/prev*100).toFixed(1) : null;
+  }
+
+  const roasVal = (!monthVal||monthVal==='all')
+    ? avgNonZero(DATA.monthly.roas)
+    : (DATA.monthly.roas[idx]||0);
+
+  strip.innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-emoji">💰</div>
+      <div class="kpi-label">ยอดขายรวม</div>
+      <div class="kpi-value">฿${fmtK(totalSales)}</div>
+      ${salesChange !== null ? `<div class="kpi-change ${salesChange>=0?'up':'down'}">${salesChange>=0?'▲':'▼'} ${Math.abs(salesChange)}% MoM</div>` : '<div class="kpi-change neutral">เดือนแรก</div>'}
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-emoji">📦</div>
+      <div class="kpi-label">คำสั่งซื้อ</div>
+      <div class="kpi-value">${totalOrders > 0 ? totalOrders.toLocaleString() : '—'}</div>
+      <div class="kpi-change neutral">orders</div>
+    </div>
+    <div class="kpi-card gold">
+      <div class="kpi-emoji">📣</div>
+      <div class="kpi-label">ค่าแอดรวม</div>
+      <div class="kpi-value">฿${fmtK(totalAd)}</div>
+      <div class="kpi-change neutral">รวมทุก session</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-emoji">📈</div>
+      <div class="kpi-label">ROAS เฉลี่ย</div>
+      <div class="kpi-value">${roasVal > 0 ? roasVal.toFixed(1)+'x' : 'N/A'}</div>
+      <div class="kpi-change up">ยอด/ค่าแอด</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-emoji">🛒</div>
+      <div class="kpi-label">% Organic</div>
+      <div class="kpi-value">${lastOrganicPct()}%</div>
+      <div class="kpi-change neutral">เดือนล่าสุด</div>
+    </div>
+  `;
+}
+
+function avgNonZero(arr) {
+  const f = (arr||[]).filter(v=>v>0);
+  return f.length ? f.reduce((a,b)=>a+b,0)/f.length : 0;
+}
+function lastOrganicPct() {
+  const m = DATA.organic.monthly;
+  return m && m.length ? (m[m.length-1].orgPct||0) : 0;
+}
+
+function filterMonth() {
+  const m = document.getElementById('monthFilter').value;
+  renderKPIs(m);
+}
+
+/* ==================== CHARTS ==================== */
+const charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function initChartsForPage(page) {
+  if (page === 'overview' || page === undefined) initOverviewCharts();
+  if (page === 'mom') initMoMCharts();
+  if (page === 'organic') initOrganicCharts();
+  if (page === 'hourly') { initHourlyChart(); buildHeatmap(); }
+  if (page === 'campaign') initCampaignCharts();
+  if (page === 'hosts') initHostCharts();
+  if (page === 'ads') initAdsCharts();
+}
+
+function initOverviewCharts() {
+  destroyChart('monthly'); destroyChart('daily');
+  populateDailyMonthFilter();
+
+  charts['monthly'] = new Chart(document.getElementById('chartMonthly'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [
+        { label: 'ยอดขาย (฿)', data: DATA.monthly.sales, backgroundColor: DATA.monthly.sales.map((_,i)=> i===DATA.monthly.sales.length-1?COLORS.orange:COLORS.orangePale), borderColor: COLORS.orange, borderWidth: 2, borderRadius: 8, yAxisID: 'y' },
+        { label: 'คำสั่งซื้อ', data: DATA.monthly.orders, type: 'line', borderColor: COLORS.green, backgroundColor: 'transparent', pointBackgroundColor: COLORS.green, borderWidth: 2.5, pointRadius: 6, yAxisID: 'y2' }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '฿'+fmtK(v), font:{size:11} }, grid: { color: 'rgba(238,77,45,0.08)' } },
+        y2: { position: 'right', ticks: { font:{size:11} }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Filter daily series down to the selected month (defaults to latest month)
+  const selMonth = document.getElementById('dailyMonthFilter') ? document.getElementById('dailyMonthFilter').value : 'all';
+  const allMonths = DATA.daily.months || [];
+  let dailyDates = DATA.daily.dates, dailySales = DATA.daily.sales;
+  if (selMonth && selMonth !== 'all') {
+    const idxs = allMonths.map((m,i)=> m===selMonth ? i : -1).filter(i=>i>=0);
+    dailyDates = idxs.map(i=>DATA.daily.dates[i]);
+    dailySales = idxs.map(i=>DATA.daily.sales[i]);
+  }
+
+  charts['daily'] = new Chart(document.getElementById('chartDaily'), {
+    type: 'line',
+    data: {
+      labels: dailyDates,
+      datasets: [{
+        label: 'ยอดขาย/วัน', data: dailySales,
+        borderColor: COLORS.orange, backgroundColor: 'rgba(238,77,45,0.08)',
+        borderWidth: 2, pointRadius: 3, pointBackgroundColor: COLORS.orange,
+        fill: true, tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font:{size:9}, maxRotation: 45, autoSkip: true, maxTicksLimit: 20 } },
+        y: { ticks: { callback: v => '฿'+fmtK(v), font:{size:10} }, grid: { color: 'rgba(238,77,45,0.08)' } }
+      }
+    }
+  });
+}
+
+function initMoMCharts() {
+  destroyChart('mom'); destroyChart('momOrders');
+
+  const countSel = document.getElementById('momCountFilter');
+  const countVal = countSel ? countSel.value : '3';
+  const totalMonths = DATA.monthly.labels.length;
+  const take = countVal === 'all' ? totalMonths : Math.min(parseInt(countVal,10), totalMonths);
+
+  const labels = DATA.monthly.labels.slice(-take);
+  const sales  = DATA.monthly.sales.slice(-take);
+  const orders = DATA.monthly.orders.slice(-take);
+  const n = labels.length;
+
+  charts['mom'] = new Chart(document.getElementById('chartMoM'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: sales,
+        backgroundColor: sales.map((_,i)=> i===n-1?COLORS.orange:'rgba(238,77,45,0.3)'),
+        borderRadius: 8, borderWidth: 0
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: {display:false} },
+      scales: { y: { ticks: { callback: v => '฿'+fmtK(v), font:{size:11} }, grid:{color:'rgba(238,77,45,0.08)'} } } }
+  });
+  charts['momOrders'] = new Chart(document.getElementById('chartMoMOrders'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{ data: orders, backgroundColor: orders.map((_,i)=> i===n-1?COLORS.green:'rgba(15,155,106,0.2)'), borderRadius: 8 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} },
+      scales: { y: { ticks: {font:{size:11}}, grid:{color:'rgba(0,0,0,0.04)'} } } }
+  });
+
+  // Update MoM cards + insight texts dynamically
+  renderMoMHero(take);
+}
+
+function renderMoMHero(take) {
+  const grid = document.querySelector('#page-mom .mom-grid');
+  if (!grid) return;
+  const labels = DATA.monthly.labels;
+  const sales  = DATA.monthly.sales;
+  const orders = DATA.monthly.orders;
+  // Hero cards always show at most 3, even if the chart above is comparing more months —
+  // showing many small cards would clutter the top of the page.
+  const heroCount = Math.min(take || 3, 3, labels.length);
+  const last3idx = labels.map((_,i)=>i).slice(-heroCount);
+
+  grid.innerHTML = last3idx.map((idx,i) => {
+    const isCurrent = i === last3idx.length - 1;
+    const prevIdx = last3idx[i-1];
+    const pct = prevIdx!==undefined && sales[prevIdx]>0 ? ((sales[idx]-sales[prevIdx])/sales[prevIdx]*100) : null;
+    const badge = pct===null ? '<div class="mom-change-badge tag-gray">เดือนแรก</div>' :
+      pct>=0 ? `<div class="mom-change-badge tag-green">▲ +${pct.toFixed(1)}% MoM</div>` :
+               `<div class="mom-change-badge tag-red">▼ ${Math.abs(pct).toFixed(1)}% MoM</div>`;
+    return `<div class="mom-card ${isCurrent?'current':''}">
+      <div class="mom-month">${labels[idx]}${isCurrent?' 🔥':''}</div>
+      <div class="mom-main">฿${fmtK(sales[idx]||0)}</div>
+      <div class="mom-sub">${orders[idx]>0?orders[idx].toLocaleString()+' orders':'—'}</div>
+      ${badge}
+    </div>`;
+  }).join('');
+
+  const insightRow = document.querySelector('#page-mom .insight-row');
+  if (insightRow) {
+    const lastIdx = labels.length-1, prevIdx = labels.length-2;
+    const growth = prevIdx>=0 && sales[prevIdx]>0 ? ((sales[lastIdx]-sales[prevIdx])/sales[prevIdx]*100) : null;
+    insightRow.innerHTML = `
+      <div class="insight-card">
+        <div class="insight-icon orange">🚀</div>
+        <div class="insight-text">
+          <div class="label">การเติบโตล่าสุด</div>
+          <div class="value">${growth!==null?(growth>=0?'+':'')+growth.toFixed(1)+'%':'—'} ${labels[prevIdx]||''}→${labels[lastIdx]||''}</div>
+          <div class="desc">เทียบเดือนล่าสุดกับเดือนก่อนหน้า</div>
+        </div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon green">✅</div>
+        <div class="insight-text">
+          <div class="label">เดือนนี้</div>
+          <div class="value">฿${(sales[lastIdx]||0).toLocaleString()}</div>
+          <div class="desc">${labels[lastIdx]||''} — orders ${orders[lastIdx]>0?orders[lastIdx].toLocaleString():'—'}</div>
+        </div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon gold">🎯</div>
+        <div class="insight-text">
+          <div class="label">เป้าหมายเดือนหน้า (+15%)</div>
+          <div class="value">฿${Math.round((sales[lastIdx]||0)*1.15).toLocaleString()}</div>
+          <div class="desc">ต้องการเพิ่ม ฿${Math.round((sales[lastIdx]||0)*0.15).toLocaleString()}</div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+/* ==================== ORGANIC CHARTS (new page) ==================== */
+function populateOrgMonthFilter(monthlyWithData) {
+  const sel = document.getElementById('orgMonthFilter');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="all">ทุกเดือน (เฉลี่ย)</option>' +
+    monthlyWithData.map(m => `<option value="${m.month}">${m.label}</option>`).join('');
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function initOrganicCharts() {
+  destroyChart('orgBar'); destroyChart('orgTrend'); destroyChart('orgHour');
+  const org = DATA.organic;
+  const allMonthly = org.monthly || [];
+  const hourly = org.hourly || [];
+
+  // Only months where the Sheet actually has organic data (orgGmv + adGmv > 0).
+  // Earlier months before the bot started logging this field show as "no data" instead of a misleading 0%.
+  const monthlyWithData = allMonthly.filter(m => (m.orgGmv||0) + (m.adGmv||0) > 0);
+
+  populateOrgMonthFilter(monthlyWithData);
+  const selMonth = document.getElementById('orgMonthFilter') ? document.getElementById('orgMonthFilter').value : 'all';
+  const monthly = selMonth === 'all' ? monthlyWithData : monthlyWithData.filter(m => m.month === selMonth);
+
+  // Health score — calculated only from the months currently in view
+  let score = 0, healthLabel = 'ยังไม่มีข้อมูล organic', healthColor = 'gray';
+  if (monthly.length) {
+    const avg = monthly.reduce((s,m)=>s+m.orgPct,0) / monthly.length;
+    const trend = monthly.length >= 2 ? (monthly[monthly.length-1].orgPct - monthly[monthly.length-2].orgPct) : 0;
+    score = Math.max(0, Math.min(100, Math.round(avg + trend*2)));
+    if (score >= 60) { healthLabel = 'ช่องกำลังติด 🔥 organic เพิ่มขึ้น'; healthColor = 'green'; }
+    else if (score >= 35) { healthLabel = 'กำลังเติบโต ต้องดู trend ต่อ'; healthColor = 'gold'; }
+    else { healthLabel = 'ยังพึ่ง paid มาก — ต้องสร้าง organic'; healthColor = 'orange'; }
+  }
+
+  const circ = 251.2;
+  const offset = circ - circ*(score/100);
+  const col = healthColor === 'green' ? COLORS.green : healthColor === 'gold' ? COLORS.gold : COLORS.orange;
+  const ring = document.getElementById('orgHealthRing');
+  if (ring) { ring.style.stroke = col; setTimeout(()=>ring.style.strokeDashoffset = offset, 50); }
+  const numEl = document.getElementById('orgHealthNum');
+  if (numEl) { numEl.textContent = score || '—'; numEl.style.color = col; }
+  const verdictEl = document.getElementById('orgHealthVerdict');
+  if (verdictEl) { verdictEl.textContent = healthLabel; verdictEl.style.color = col; }
+
+  // KPIs — based on the last month within the current filter
+  const last = monthly[monthly.length-1] || {};
+  const prev = monthly[monthly.length-2] || {};
+  const diff = (prev.orgPct>0) ? (last.orgPct - prev.orgPct) : null;
+  const kpiOrg = document.getElementById('kpiOrganic');
+  if (kpiOrg) {
+    if (!monthly.length) {
+      kpiOrg.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text3);padding:20px">ยังไม่มีข้อมูล organic ในเดือนนี้</div>`;
+    } else {
+      kpiOrg.innerHTML = `
+        <div class="kpi-card green"><div class="kpi-emoji">🌱</div><div class="kpi-label">% Organic${selMonth==='all'?' (เดือนล่าสุด)':''}</div><div class="kpi-value">${last.orgPct||0}%</div><div class="kpi-change ${diff>=0?'up':'down'}">${diff!==null?(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'%':'—'}</div></div>
+        <div class="kpi-card"><div class="kpi-emoji">📣</div><div class="kpi-label">% Paid${selMonth==='all'?' (เดือนล่าสุด)':''}</div><div class="kpi-value">${last.adPct||0}%</div><div class="kpi-change neutral">ยิ่งลดยิ่งดี</div></div>
+        <div class="kpi-card gold"><div class="kpi-emoji">💰</div><div class="kpi-label">ยอด Organic รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.orgGmv||0),0))}</div><div class="kpi-change neutral">${selMonth==='all'?'ทุกเดือนที่มีข้อมูล':DATA.monthly.labels[DATA.monthly.months.indexOf(selMonth)]||''}</div></div>
+        <div class="kpi-card"><div class="kpi-emoji">📊</div><div class="kpi-label">ยอด Paid รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.adGmv||0),0))}</div><div class="kpi-change neutral">${selMonth==='all'?'ทุกเดือนที่มีข้อมูล':DATA.monthly.labels[DATA.monthly.months.indexOf(selMonth)]||''}</div></div>
+      `;
+    }
+  }
+
+  charts['orgBar'] = new Chart(document.getElementById('chartOrgBar'), {
+    type: 'bar',
+    data: { labels: monthly.map(m=>m.label), datasets: [
+      { label:'Organic', data: monthly.map(m=>m.orgGmv), backgroundColor: COLORS.green, borderRadius:4 },
+      { label:'Paid', data: monthly.map(m=>m.adGmv), backgroundColor: COLORS.orange, borderRadius:4 }
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{stacked:true}, y:{stacked:true, ticks:{callback: v => '฿'+fmtK(v),font:{size:11}}, grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  charts['orgTrend'] = new Chart(document.getElementById('chartOrgTrend'), {
+    type:'line',
+    data:{ labels: monthly.map(m=>m.label), datasets:[{ label:'% Organic', data: monthly.map(m=>m.orgPct), borderColor: COLORS.green, backgroundColor:'rgba(15,155,106,0.1)', borderWidth:2.5, pointRadius:6, pointBackgroundColor:COLORS.green, fill:true, tension:0.3 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  charts['orgHour'] = new Chart(document.getElementById('chartOrgHour'), {
+    type:'bar',
+    data:{ labels: hourly.map(h=>h.hour+':00'), datasets:[{ label:'% Organic', data: hourly.map(h=>h.orgPct), backgroundColor: hourly.map(h=>h.orgPct>50?'rgba(15,155,106,0.8)':h.orgPct>25?'rgba(15,155,106,0.4)':'rgba(238,77,45,0.3)'), borderRadius:3 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{font:{size:9},maxRotation:45,autoSkip:false}}, y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+  });
+
+  // Insights
+  const bestOrgHour = hourly.length ? hourly.reduce((a,b)=> a.orgPct>b.orgPct?a:b) : {hour:'—',orgPct:0};
+  const ins = document.getElementById('orgInsights');
+  if (ins) {
+    ins.innerHTML = `
+      <div class="insight-card"><div class="insight-icon green">🌱</div><div class="insight-text"><div class="label">ชั่วโมง organic ดีสุด</div><div class="value">${bestOrgHour.hour}:00 น. (${bestOrgHour.orgPct}%)</div><div class="desc">ช่วงนี้ลด paid ได้ ลูกค้า discover ช่องเองมากที่สุด</div></div></div>
+      <div class="insight-card"><div class="insight-icon orange">${diff>0?'📈':diff<0?'📉':'❓'}</div><div class="insight-text"><div class="label">Trend organic</div><div class="value">${diff!==null?(diff>=0?'เพิ่มขึ้น ':'ลดลง ')+Math.abs(diff)+'%':'ยังไม่มีข้อมูล'}</div><div class="desc">${diff>0?'ดี! organic กำลังเติบโต — ช่องกำลังติด':diff<0?'ระวัง organic ลดลง — ต้องเพิ่ม content quality':'รอข้อมูลอีกเดือนเพื่อบอก trend'}</div></div></div>
+      <div class="insight-card"><div class="insight-icon gold">💡</div><div class="insight-text"><div class="label">คำแนะนำ</div><div class="value">${score>=60?'รักษา momentum':score>=35?'เพิ่ม engagement':'สร้าง organic ก่อน'}</div><div class="desc">${score>=60?'ช่องกำลังแข็งแกร่ง — focus ที่ conversion มากกว่า acquisition':score>=35?'ทำ content ที่ shareable เช่น before/after, demo สินค้า':'เพิ่มความสม่ำเสมอในการไลฟ์ และตอบ comment ให้มากขึ้น'}</div></div></div>
+    `;
+  }
+
+  const tbl = document.getElementById('orgTable');
+  if (tbl) {
+    tbl.innerHTML = monthly.map(m => {
+      const tagC = m.orgPct>=60?'tag-green':m.orgPct>=35?'tag-gold':m.orgPct>0?'tag-orange':'tag-gray';
+      const status = m.orgPct>=60?'ช่องติด 🔥':m.orgPct>=35?'กำลังเติบโต':m.orgPct>0?'ต้องพัฒนา':'ไม่มีข้อมูล';
+      return `<tr><td>${m.label}</td><td>฿${(m.orgGmv||0).toLocaleString()}</td><td>฿${(m.adGmv||0).toLocaleString()}</td><td>${m.orgPct||0}%</td><td><span class="tag ${tagC}">${status}</span></td></tr>`;
+    }).join('');
+  }
+}
+
+function initHourlyChart() {
+  destroyChart('hourly');
+  const colors = DATA.hourly.avg.map(v => {
+    if (v > 9000) return COLORS.orange;
+    if (v > 6000) return COLORS.orangeLight;
+    if (v > 3000) return 'rgba(238,77,45,0.5)';
+    return 'rgba(238,77,45,0.25)';
+  });
+  charts['hourly'] = new Chart(document.getElementById('chartHourly'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:24},(_,i)=>i+':00'),
+      datasets: [{ label: 'ยอดขายเฉลี่ย/ชม.', data: DATA.hourly.avg, backgroundColor: colors, borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend:{display:false} },
+      scales: {
+        x: { ticks: { font:{size:10}, maxRotation:45, autoSkip:false } },
+        y: { ticks: { callback: v => '฿'+fmtK(v), font:{size:10} }, grid:{color:'rgba(238,77,45,0.08)'} }
+      }
+    }
+  });
+
+  // Update the 4-slot KPI strip on hourly page dynamically
+  const slots = [{l:'ดึก 00-06',r:[0,5],emoji:'🌙'},{l:'เช้า 06-12',r:[6,11],emoji:'☀️'},{l:'เที่ยง-บ่าย 12-18',r:[12,17],emoji:'🌤️'},{l:'เย็น 18-24',r:[18,23],emoji:'🔥'}];
+  const sales = DATA.hourly.avg, roas = DATA.hourly.roas||[];
+  const sd = slots.map(s => {
+    const sSum = sales.slice(s.r[0], s.r[1]+1).reduce((a,b)=>a+b,0);
+    const rArr = roas.slice(s.r[0], s.r[1]+1).filter(v=>v>0);
+    return { ...s, sales:sSum, roas: rArr.length ? (rArr.reduce((a,b)=>a+b,0)/rArr.length) : 0 };
+  });
+  const maxS = Math.max(...sd.map(s=>s.sales));
+  const stripEl = document.querySelector('#page-hourly .kpi-strip');
+  if (stripEl) {
+    stripEl.innerHTML = sd.map(s => `
+      <div class="kpi-card ${s.sales===maxS?'':'green'}">
+        <div class="kpi-emoji">${s.emoji}</div>
+        <div class="kpi-label">${s.l}</div>
+        <div class="kpi-value">฿${fmtK(s.sales)}</div>
+        <div class="kpi-change ${s.sales===maxS?'up':'neutral'}">ROAS ${s.roas.toFixed(0)}x ${s.sales===maxS?'PEAK 🔥':''}</div>
+      </div>`).join('');
+  }
+}
+
+function buildHeatmap() {
+  const days = ['จ.','อ.','พ.','พฤ.','ศ.','ส.','อา.'];
+  const hours = [0,2,4,6,8,10,12,14,16,18,20,22];
+  const avg = DATA.hourly.avg.length ? DATA.hourly.avg : Array(24).fill(0);
+  const dayScale = [0.85,0.88,0.90,0.87,0.92,1.15,1.25];
+  const maxVal = Math.max(...avg) * 1.25 || 1;
+  let html = '<tr><th></th>';
+  hours.forEach(h => html += `<th>${h}:00</th>`);
+  html += '</tr>';
+  days.forEach((d, di) => {
+    html += `<tr><td class="hm-label">${d}</td>`;
+    hours.forEach(h => {
+      const v = Math.round((avg[h]||0) * dayScale[di]);
+      const pct = v / maxVal;
+      const alpha = 0.12 + pct * 0.82;
+      const bg = `rgba(238,77,45,${alpha.toFixed(2)})`;
+      const textColor = pct > 0.55 ? '#fff' : '#A06050';
+      html += `<td style="background:${bg};color:${textColor}" title="${d} ${h}:00 ≈ ฿${fmtK(v)}">${fmtK(v)}</td>`;
+    });
+    html += '</tr>';
+  });
+  document.getElementById('heatmapTable').innerHTML = html;
+}
+
+function initCampaignCharts() {
+  destroyChart('campaign'); destroyChart('campaignPie'); destroyChart('campaignBar');
+  const d = getActiveChannelData();
+  const camp = (d && d.campaign) || [];
+  const colMap = [COLORS.orange, COLORS.green, COLORS.gold, COLORS.gray, 'rgba(155,155,155,0.4)'];
+
+  charts['campaign'] = new Chart(document.getElementById('chartCampaign'), {
+    type: 'bar',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.avgPerDay), backgroundColor: colMap, borderRadius: 8 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}},
+      scales:{ y:{ticks:{callback: v => '฿'+fmtK(v),font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  charts['campaignPie'] = new Chart(document.getElementById('chartCampaignPie'), {
+    type: 'doughnut',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.total), backgroundColor: colMap, borderWidth: 2, borderColor: '#fff' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} }, cutout:'60%' }
+  });
+
+  // Custom legend: color swatch + label + percentage of total, laid out in a fixed
+  // 2-column grid so rows stay balanced regardless of label text length
+  // (Chart.js's built-in legend doesn't show percentages, and flex-wrap caused uneven rows).
+  const pieLegendEl = document.getElementById('campaignPieLegend');
+  if (pieLegendEl) {
+    const grandTotal = camp.reduce((s,c)=>s+(c.total||0), 0);
+    pieLegendEl.innerHTML = camp.map((c,i) => {
+      const pct = grandTotal > 0 ? Math.round((c.total||0) / grandTotal * 100) : 0;
+      return `<div class="legend-item"><span class="legend-dot" style="background:${colMap[i]}"></span>${c.label} — ${pct}%</div>`;
+    }).join('');
+  }
+
+  charts['campaignBar'] = new Chart(document.getElementById('chartCampaignBar'), {
+    type: 'bar',
+    data: { labels: camp.map(c=>c.label), datasets: [{ data: camp.map(c=>c.avgPerDay), backgroundColor: colMap, borderRadius: 8 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:11}}},y:{ticks:{callback: v => '฿'+fmtK(v),font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  const tbody = document.querySelector('#page-campaign .data-table tbody');
+  if (tbody) {
+    tbody.innerHTML = camp.map(c => {
+      const tagC = c.vsNormal>50?'tag-green':c.vsNormal>0?'tag-gold':c.vsNormal<0?'tag-red':'tag-gray';
+      return `<tr><td>${c.label}</td><td><span class="tag ${tagC}">${c.vsNormal>0?'▲ +':''}${c.vsNormal}%</span></td><td>฿${(c.total||0).toLocaleString()}</td><td colspan="2">เฉลี่ย ฿${(c.avgPerDay||0).toLocaleString()}/วัน (${c.count} วัน)</td></tr>`;
+    }).join('');
+  }
+}
+
+function populateHostMonthFilter() {
+  const sel = document.getElementById('hostMonthFilter');
+  if (!sel) return;
+  const cur = sel.value;
+  const months = DATA.hostsByMonth || [];
+  sel.innerHTML = '<option value="all">ทุกเดือน (สะสม)</option>' +
+    months.map(m => {
+      const labelIdx = DATA.monthly.months.indexOf(m.month);
+      const label = labelIdx >= 0 ? DATA.monthly.labels[labelIdx] : m.month;
+      return `<option value="${m.month}">${label}</option>`;
+    }).join('');
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function initHostCharts() {
+  destroyChart('hosts'); destroyChart('hostPie');
+  populateHostMonthFilter();
+
+  const sel = document.getElementById('hostMonthFilter');
+  const selMonth = sel ? sel.value : 'all';
+  let sourceHosts;
+  if (selMonth === 'all') {
+    sourceHosts = DATA.hostsAll || DATA.hosts || [];
+  } else {
+    const monthEntry = (DATA.hostsByMonth||[]).find(m => m.month === selMonth);
+    sourceHosts = monthEntry ? monthEntry.hosts : [];
+  }
+
+  const sorted = [...sourceHosts].sort((a,b)=>b.gmv-a.gmv).slice(0, 5); // Top 5 only
+
+  if (!sorted.length) {
+    document.getElementById('hostTable').innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">ไม่มีข้อมูลในเดือนที่เลือก</td></tr>`;
+    return;
+  }
+
+  charts['hosts'] = new Chart(document.getElementById('chartHosts'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(h=>h.name),
+      datasets: [{ data: sorted.map(h=>h.gmv), backgroundColor: sorted.map((_,i)=>i===0?COLORS.orange:i===1?COLORS.orangeLight:'rgba(238,77,45,0.3)'), borderRadius:6 }]
+    },
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{x:{ticks:{callback: v => '฿'+fmtK(v),font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}},y:{ticks:{font:{size:12}}}} }
+  });
+
+  const hostColors = [COLORS.orange,'#FF7337','#FF9B7A','rgba(238,77,45,0.6)','rgba(238,77,45,0.45)'];
+  charts['hostPie'] = new Chart(document.getElementById('chartHostPie'), {
+    type: 'doughnut',
+    data: {
+      labels: sorted.map(h=>h.name),
+      datasets: [{
+        data: sorted.map(h=>h.gmv),
+        backgroundColor: hostColors,
+        borderWidth:2, borderColor:'#fff'
+      }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'55%' }
+  });
+
+  // Custom legend: color swatch + name + % of the Top-5 total, in a fixed 2-column
+  // grid so rows stay balanced (same approach as the campaign page legend).
+  const hostLegendEl = document.getElementById('hostPieLegend');
+  if (hostLegendEl) {
+    const top5Total = sorted.reduce((s,h)=>s+(h.gmv||0), 0);
+    hostLegendEl.innerHTML = sorted.map((h,i) => {
+      const pct = top5Total > 0 ? Math.round((h.gmv||0) / top5Total * 100) : 0;
+      return `<div class="legend-item"><span class="legend-dot" style="background:${hostColors[i]}"></span>${h.name} — ${pct}%</div>`;
+    }).join('');
+  }
+
+  const tbody = document.getElementById('hostTable');
+  tbody.innerHTML = sorted.map((h,i) => {
+    const rankClass = i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':'rank-n';
+    const avg = Math.round(h.gmv / h.hours);
+    const pct = sorted[0].gmv ? Math.round(h.gmv / sorted[0].gmv * 100) : 0;
+    return `<tr>
+      <td><span class="rank-badge ${rankClass}">${i+1}</span></td>
+      <td><strong>${h.name}</strong></td>
+      <td>฿${fmtK(h.gmv)}<div class="pbar-wrap"><div class="pbar" style="width:${pct}%"></div></div></td>
+      <td>${h.hours} ชม.</td>
+      <td>฿${fmtK(avg)}</td>
+      <td><span class="tag tag-orange">${h.best}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function initAdsCharts() {
+  destroyChart('ads'); destroyChart('roas');
+
+  charts['ads'] = new Chart(document.getElementById('chartAds'), {
+    type: 'bar',
+    data: {
+      labels: DATA.monthly.labels,
+      datasets: [
+        { label: 'ยอดขาย', data: DATA.monthly.sales, backgroundColor: COLORS.orange, borderRadius:6, yAxisID:'y' },
+        { label: 'ค่าแอด', data: DATA.monthly.adSpend, backgroundColor: COLORS.gold, borderRadius:6, yAxisID:'y' }
+      ]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback: v => '฿'+fmtK(v),font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  const periods = [{l:'ดึก 00-06',r:[0,5]},{l:'เช้า 06-12',r:[6,11]},{l:'บ่าย 12-18',r:[12,17]},{l:'เย็น 18-24',r:[18,23]}];
+  const roasArr = DATA.hourly.roas || [];
+  const rd = periods.map(p => {
+    const slice = roasArr.slice(p.r[0], p.r[1]+1).filter(v=>v>0);
+    return slice.length ? slice.reduce((a,b)=>a+b,0)/slice.length : 0;
+  });
+
+  charts['roas'] = new Chart(document.getElementById('chartROAS'), {
+    type: 'bar',
+    data: {
+      labels: periods.map(p=>p.l),
+      datasets: [{
+        data: rd.map(v=>+v.toFixed(1)),
+        backgroundColor: [COLORS.orange, 'rgba(238,77,45,0.6)', 'rgba(238,77,45,0.35)', 'rgba(238,77,45,0.5)'],
+        borderRadius:8
+      }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>v+'x',font:{size:11}},grid:{color:'rgba(238,77,45,0.08)'}}} }
+  });
+
+  // KPI strip on Ads page
+  const totalAd = DATA.monthly.adSpend.reduce((a,b)=>a+b,0);
+  const totalSales = DATA.monthly.sales.reduce((a,b)=>a+b,0);
+  const overallRoas = totalAd>0 ? (totalSales/totalAd) : 0;
+  const best = rd.reduce((maxIdx,v,i,arr)=> v>arr[maxIdx]?i:maxIdx, 0);
+  const stripEl = document.querySelector('#page-ads .kpi-strip');
+  if (stripEl) {
+    stripEl.innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">ค่าแอดรวม</div><div class="kpi-value">฿${fmtK(totalAd)}</div><div class="kpi-change neutral">ทุก session</div></div>
+      <div class="kpi-card green"><div class="kpi-label">ROAS รวม</div><div class="kpi-value">${overallRoas>0?overallRoas.toFixed(1)+'x':'N/A'}</div><div class="kpi-change up">ยอดขาย/ค่าแอด</div></div>
+      <div class="kpi-card gold"><div class="kpi-label">ROAS ดีที่สุด</div><div class="kpi-value">${rd[best]?rd[best].toFixed(0)+'x':'—'}</div><div class="kpi-change up">${periods[best]?periods[best].l:''}</div></div>
+      <div class="kpi-card"><div class="kpi-label">เฉลี่ยต่อเดือน</div><div class="kpi-value">฿${fmtK(DATA.monthly.labels.length?totalAd/DATA.monthly.labels.length:0)}</div><div class="kpi-change neutral">ค่าแอด/เดือน</div></div>
+    `;
+  }
+}
+
+/* ==================== SETUP / CHANNEL CONFIG PAGE ==================== */
+function renderChannelInputRows() {
+  const list = document.getElementById('channelInputList');
+  if (!list) return;
+  if (!channelsCfg.length) channelsCfg = [{ name: '729flux', sheetId: '' }];
+  list.innerHTML = channelsCfg.map((c,i) => `
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="select-styled" style="flex:1;min-width:100px" placeholder="ชื่อช่อง" value="${c.name||''}" oninput="channelsCfg[${i}].name=this.value">
+      <input class="select-styled" style="flex:2" placeholder="Sheet ID" value="${c.sheetId||''}" oninput="channelsCfg[${i}].sheetId=this.value.trim()">
+      ${channelsCfg.length>1 ? `<button class="btn-primary" style="background:var(--red-bg);color:var(--red);padding:8px 12px" onclick="removeChannelRow(${i})">✕</button>` : ''}
+    </div>
+  `).join('');
+}
+function addChannelRow() { channelsCfg.push({ name:'ช่องใหม่', sheetId:'' }); renderChannelInputRows(); }
+function removeChannelRow(i) { channelsCfg.splice(i,1); renderChannelInputRows(); }
+
+async function saveChannelsAndLoad() {
+  const valid = channelsCfg.filter(c=>c.sheetId);
+  const statusEl = document.getElementById('setupStatusMsg');
+  if (!valid.length) { statusEl.textContent = '❌ กรุณาใส่ Sheet ID อย่างน้อย 1 ช่อง'; statusEl.style.color = 'var(--red)'; return; }
+  localStorage.setItem(LS_CHANNELS, JSON.stringify(channelsCfg));
+  statusEl.textContent = '⏳ กำลังโหลดข้อมูล...'; statusEl.style.color = 'var(--text3)';
+  await loadAllData();
+  statusEl.textContent = '✅ บันทึกและโหลดสำเร็จ!'; statusEl.style.color = 'var(--green)';
+}
+
+/* ==================== DEMO DATA (fallback) ==================== */
+function buildDemoRaw() {
+  const ch = {
+    channelName: "729flux (demo)",
+    monthly: [
+      {month:"2026-03",label:"มี.ค.",sales:90754,orders:0,adSpend:0,cart:0,roas:0},
+      {month:"2026-04",label:"เม.ย.",sales:853699,orders:647,adSpend:37200,cart:2512,roas:22.9},
+      {month:"2026-05",label:"พ.ค.",sales:850454,orders:1121,adSpend:23374,cart:3264,roas:36.4},
+    ],
+    daily: [
+      {date:"2026-03-24",sales:3673},{date:"2026-03-25",sales:6980},{date:"2026-03-26",sales:16555},{date:"2026-03-27",sales:16148},{date:"2026-03-28",sales:5823},{date:"2026-03-29",sales:16779},{date:"2026-03-30",sales:30615},
+      {date:"2026-04-04",sales:163660},{date:"2026-04-06",sales:7484},{date:"2026-04-07",sales:19296},{date:"2026-04-08",sales:33530},{date:"2026-04-10",sales:26107},{date:"2026-04-12",sales:62003},{date:"2026-04-17",sales:26085},{date:"2026-04-19",sales:50338},{date:"2026-04-21",sales:27964},{date:"2026-04-23",sales:12266},{date:"2026-04-24",sales:30442},{date:"2026-04-25",sales:46643},{date:"2026-04-28",sales:51451},
+      {date:"2026-05-02",sales:100985},{date:"2026-05-03",sales:49238},{date:"2026-05-04",sales:28530},{date:"2026-05-05",sales:205907},{date:"2026-05-06",sales:247259},{date:"2026-05-07",sales:74771},{date:"2026-05-08",sales:46090},{date:"2026-05-09",sales:33081},{date:"2026-05-10",sales:21736},{date:"2026-05-11",sales:32930},{date:"2026-05-12",sales:78365},{date:"2026-05-13",sales:19487},{date:"2026-05-15",sales:3010},{date:"2026-05-21",sales:31922},{date:"2026-05-22",sales:9617},{date:"2026-05-23",sales:47084},
+    ],
+    hourly: [3358,5078,3924,2889,1460,1290,2410,3860,4290,5120,6180,7760,5430,4890,5760,4210,3870,3190,4820,7340,8560,9120,10480,11200].map((v,h)=>({hour:h,avgSales:v,avgRoas:[48,52,45,38,20,15,22,28,31,25,20,18,22,18,21,19,22,25,30,28,26,24,22,20][h]})),
+    hosts: {
+      all: [
+        {name:'นูไอนี',sales:412000,hours:95,best:'เย็น/กลางวัน'},
+        {name:'ดาด้า',sales:395000,hours:88,best:'เช้า-กลางวัน'},
+        {name:'นาเดีย',sales:310000,hours:112,best:'เย็น'},
+        {name:'ฟาตีเมาะห์',sales:298000,hours:108,best:'เช้า-บ่าย'},
+        {name:'ฟิรดาวส์',sales:198000,hours:52,best:'กลางวัน'},
+        {name:'นูรูฮัฟนา',sales:175000,hours:96,best:'ดึก'},
+        {name:'นารีมี',sales:142000,hours:60,best:'ดึก-เช้า'},
+      ],
+      // Per-month breakdown so the "เลือกเดือน" dropdown on the Hosts page has real,
+      // verifiably-different numbers to switch between (used only in demo/offline mode).
+      byMonth: [
+        { month: "2026-03", hosts: [
+          {name:'นูไอนี',sales:18000,hours:10,best:'เย็น'},
+          {name:'ดาด้า',sales:15000,hours:9,best:'เช้า'},
+          {name:'นาเดีย',sales:14000,hours:12,best:'เย็น'},
+          {name:'ฟาตีเมาะห์',sales:12000,hours:11,best:'บ่าย'},
+          {name:'นูรูฮัฟนา',sales:9000,hours:8,best:'ดึก'},
+        ]},
+        { month: "2026-04", hosts: [
+          {name:'นูไอนี',sales:195000,hours:42,best:'เย็น/กลางวัน'},
+          {name:'ดาด้า',sales:178000,hours:38,best:'เช้า-กลางวัน'},
+          {name:'ฟาตีเมาะห์',sales:142000,hours:46,best:'เช้า-บ่าย'},
+          {name:'นาเดีย',sales:138000,hours:50,best:'เย็น'},
+          {name:'ฟิรดาวส์',sales:95000,hours:25,best:'กลางวัน'},
+          {name:'นูรูฮัฟนา',sales:78000,hours:44,best:'ดึก'},
+          {name:'นารีมี',sales:55000,hours:28,best:'ดึก-เช้า'},
+        ]},
+        { month: "2026-05", hosts: [
+          {name:'นาเดีย',sales:158000,hours:50,best:'เย็น'},
+          {name:'นูไอนี',sales:199000,hours:43,best:'เย็น/กลางวัน'},
+          {name:'ดาด้า',sales:202000,hours:41,best:'เช้า-กลางวัน'},
+          {name:'ฟิรดาวส์',sales:103000,hours:27,best:'กลางวัน'},
+          {name:'ฟาตีเมาะห์',sales:144000,hours:51,best:'เช้า-บ่าย'},
+          {name:'นูรูฮัฟนา',sales:88000,hours:44,best:'ดึก'},
+          {name:'นารีมี',sales:87000,hours:32,best:'ดึก-เช้า'},
+        ]},
+      ],
+    },
+    campaign: [
+      {label:'Double Day',total:369567,avgPerDay:184784,vsNormal:730,count:2},
+      {label:'Payday (25)',total:46643,avgPerDay:46643,vsNormal:90,count:1},
+      {label:'ปลายเดือน',total:51451,avgPerDay:51451,vsNormal:110,count:1},
+      {label:'Midmonth',total:3010,avgPerDay:3010,vsNormal:-85,count:1},
+      {label:'วันปกติ',total:625000,avgPerDay:25000,vsNormal:0,count:25},
+    ],
+    organic: {
+      monthly: [
+        {month:"2026-03",label:"มี.ค.",orgGmv:0,adGmv:0,orgPct:0,adPct:100},
+        {month:"2026-04",label:"เม.ย.",orgGmv:84000,adGmv:248000,orgPct:25,adPct:75},
+        {month:"2026-05",label:"พ.ค.",orgGmv:195000,adGmv:312000,orgPct:38,adPct:62},
+      ],
+      hourly: Array.from({length:24},(_,h)=>({hour:h,orgPct:Math.min(100,Math.round(20+h*1.5))})),
+      channelHealthScore: 52,
+      healthLabel: "กำลังเติบโต ต้องดู trend ต่อ",
+      healthColor: "gold",
+    },
+  };
+  return { lastUpdated: new Date().toISOString(), channels: [ch], combined: ch };
+}
+
+/* ==================== HELPERS ==================== */
+function fmtK(n) {
+  n = Math.round(n||0);
+  if (n >= 1000000) return (n/1000000).toFixed(1)+'M';
+  if (n >= 1000) return (n/1000).toFixed(1)+'K';
+  return String(n);
+}
+</script>
+</body>
+</html>
