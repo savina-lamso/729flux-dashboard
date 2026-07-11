@@ -435,6 +435,27 @@ body {
 .tag-red    { background: var(--red-bg);     color: var(--red);    box-shadow: 0 2px 0 rgba(212,32,32,0.15); }
 .tag-gray   { background: var(--gray-bg);    color: var(--gray);   box-shadow: 0 2px 0 rgba(0,0,0,0.08); }
 
+.pill-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: 'Sarabun', sans-serif;
+  box-shadow: 0 2px 0 rgba(45,91,227,0.08);
+}
+.pill-btn:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-pale); }
+.pill-btn.active {
+  background: var(--orange);
+  color: #fff;
+  border-color: var(--orange);
+  box-shadow: 0 3px 0 rgba(29,55,163,0.25);
+}
+
 /* ---- PROGRESS BAR ---- */
 .pbar-wrap {
   background: var(--orange-pale);
@@ -1119,9 +1140,11 @@ body {
           </div>
         </div>
         <div class="jodji-ph-right">
-          <select class="select-styled" id="orgMonthFilter" onchange="initOrganicCharts()"></select>
         </div>
       </div>
+
+      <!-- Pill month selector (แบบ B) -->
+      <div id="orgPillRow" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px"></div>
 
       <!-- Health score as a wide insight card -->
       <div class="chart-card" style="margin-bottom:16px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
@@ -1381,6 +1404,7 @@ function mapActiveChannelToData() {
   const hostsRaw = d.hosts || { all: [], byMonth: [] };
   const mapHostArr = arr => (arr||[]).filter(h=>h.name && h.name !== "ไม่ระบุ").map(h => ({
     name: h.name, gmv: h.sales, hours: h.hours || 1, best: h.best || "—",
+    avgPerHour: h.hours > 0 ? Math.round(h.sales / h.hours) : 0,
   }));
   DATA.hostsAll = mapHostArr(hostsRaw.all);
   DATA.hostsByMonth = (hostsRaw.byMonth||[]).map(m => ({ month: m.month, hosts: mapHostArr(m.hosts) }));
@@ -1680,13 +1704,31 @@ function renderMoMHero(take) {
 }
 
 /* ==================== ORGANIC CHARTS (new page) ==================== */
-function populateOrgMonthFilter(monthlyWithData) {
-  const sel = document.getElementById('orgMonthFilter');
-  if (!sel) return;
-  const cur = sel.value;
-  sel.innerHTML = '<option value="all">ทุกเดือน (เฉลี่ย)</option>' +
-    monthlyWithData.map(m => `<option value="${m.month}">${m.label}</option>`).join('');
-  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+// Selected organic month state — 'all' means show everything, otherwise a YYYY-MM string
+let orgSelMonth = 'all';
+
+function renderOrgPills(monthlyWithData) {
+  const row = document.getElementById('orgPillRow');
+  if (!row) return;
+
+  const presets = [
+    { id: 'all',    label: 'ทั้งหมด' },
+    { id: 'last3',  label: '3 เดือนล่าสุด' },
+  ];
+
+  const monthPills = monthlyWithData.map(m => ({ id: m.month, label: m.label }));
+
+  const all = [...presets, ...monthPills];
+
+  row.innerHTML = all.map(p => {
+    const isActive = p.id === orgSelMonth || (orgSelMonth === 'all' && p.id === 'all');
+    return `<button class="pill-btn${isActive ? ' active' : ''}" onclick="selectOrgPill('${p.id}')">${p.label}</button>`;
+  }).join('');
+}
+
+function selectOrgPill(id) {
+  orgSelMonth = id;
+  initOrganicCharts();
 }
 
 function initOrganicCharts() {
@@ -1695,15 +1737,32 @@ function initOrganicCharts() {
   const allMonthly = org.monthly || [];
   const hourly = org.hourly || [];
 
-  // Only months where the Sheet actually has organic data (orgGmv + adGmv > 0).
-  // Earlier months before the bot started logging this field show as "no data" instead of a misleading 0%.
+  // Only months with real organic data
   const monthlyWithData = allMonthly.filter(m => (m.orgGmv||0) + (m.adGmv||0) > 0);
+  renderOrgPills(monthlyWithData);
 
-  populateOrgMonthFilter(monthlyWithData);
-  const selMonth = document.getElementById('orgMonthFilter') ? document.getElementById('orgMonthFilter').value : 'all';
-  const monthly = selMonth === 'all' ? monthlyWithData : monthlyWithData.filter(m => m.month === selMonth);
+  // Determine which months to highlight vs show as background
+  let monthly, highlightIdx = -1;
+  if (orgSelMonth === 'all') {
+    monthly = monthlyWithData;
+  } else if (orgSelMonth === 'last3') {
+    monthly = monthlyWithData.slice(-3);
+  } else {
+    // Single month selected — still show ALL months on chart,
+    // but highlight the selected one so trend is visible
+    monthly = monthlyWithData;
+    highlightIdx = monthly.findIndex(m => m.month === orgSelMonth);
+  }
 
-  // Health score — calculated only from the months currently in view
+  // KPI data — based on selected month (or last month if all/last3)
+  const kpiData = (orgSelMonth !== 'all' && orgSelMonth !== 'last3')
+    ? monthly.filter(m => m.month === orgSelMonth)
+    : monthly;
+  const last = kpiData[kpiData.length-1] || {};
+  const prev = kpiData.length >= 2 ? kpiData[kpiData.length-2] : (monthly[monthly.indexOf(last)-1]||{});
+  const diff = (prev.orgPct > 0) ? (last.orgPct - prev.orgPct) : null;
+
+  // Health score from all visible months
   let score = 0, healthLabel = 'ยังไม่มีข้อมูล organic', healthColor = 'gray';
   if (monthly.length) {
     const avg = monthly.reduce((s,m)=>s+m.orgPct,0) / monthly.length;
@@ -1724,29 +1783,42 @@ function initOrganicCharts() {
   const verdictEl = document.getElementById('orgHealthVerdict');
   if (verdictEl) { verdictEl.textContent = healthLabel; verdictEl.style.color = col; }
 
-  // KPIs — based on the last month within the current filter
-  const last = monthly[monthly.length-1] || {};
-  const prev = monthly[monthly.length-2] || {};
-  const diff = (prev.orgPct>0) ? (last.orgPct - prev.orgPct) : null;
+  // KPI strip
   const kpiOrg = document.getElementById('kpiOrganic');
   if (kpiOrg) {
     if (!monthly.length) {
-      kpiOrg.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text3);padding:20px">ยังไม่มีข้อมูล organic ในเดือนนี้</div>`;
+      kpiOrg.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text3);padding:20px">ยังไม่มีข้อมูล organic ในช่วงที่เลือก</div>`;
     } else {
+      const totalOrg = kpiData.reduce((s,m)=>s+(m.orgGmv||0),0);
+      const totalAd  = kpiData.reduce((s,m)=>s+(m.adGmv||0),0);
+      const rangeLabel = orgSelMonth === 'all' ? 'ทุกเดือนที่มีข้อมูล'
+                       : orgSelMonth === 'last3' ? '3 เดือนล่าสุด'
+                       : DATA.monthly.labels[DATA.monthly.months.indexOf(orgSelMonth)] || orgSelMonth;
       kpiOrg.innerHTML = `
-        <div class="kpi-card green"><div class="kpi-emoji">🌱</div><div class="kpi-label">% Organic${selMonth==='all'?' (เดือนล่าสุด)':''}</div><div class="kpi-value">${last.orgPct||0}%</div><div class="kpi-change ${diff>=0?'up':'down'}">${diff!==null?(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'%':'—'}</div></div>
-        <div class="kpi-card"><div class="kpi-emoji">📣</div><div class="kpi-label">% Paid${selMonth==='all'?' (เดือนล่าสุด)':''}</div><div class="kpi-value">${last.adPct||0}%</div><div class="kpi-change neutral">ยิ่งลดยิ่งดี</div></div>
-        <div class="kpi-card gold"><div class="kpi-emoji">💰</div><div class="kpi-label">ยอด Organic รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.orgGmv||0),0))}</div><div class="kpi-change neutral">${selMonth==='all'?'ทุกเดือนที่มีข้อมูล':DATA.monthly.labels[DATA.monthly.months.indexOf(selMonth)]||''}</div></div>
-        <div class="kpi-card"><div class="kpi-emoji">📊</div><div class="kpi-label">ยอด Paid รวม</div><div class="kpi-value">฿${fmtK(monthly.reduce((s,m)=>s+(m.adGmv||0),0))}</div><div class="kpi-change neutral">${selMonth==='all'?'ทุกเดือนที่มีข้อมูล':DATA.monthly.labels[DATA.monthly.months.indexOf(selMonth)]||''}</div></div>
+        <div class="kpi-card green"><div class="kpi-emoji">🌱</div><div class="kpi-label">% Organic (ล่าสุด)</div><div class="kpi-value">${last.orgPct||0}%</div><div class="kpi-change ${diff>=0?'up':'down'}">${diff!==null?(diff>=0?'▲ +':'▼ ')+Math.abs(diff)+'%':'—'}</div></div>
+        <div class="kpi-card"><div class="kpi-emoji">📣</div><div class="kpi-label">% Paid (ล่าสุด)</div><div class="kpi-value">${last.adPct||0}%</div><div class="kpi-change neutral">ยิ่งลดยิ่งดี</div></div>
+        <div class="kpi-card gold"><div class="kpi-emoji">💰</div><div class="kpi-label">ยอด Organic รวม</div><div class="kpi-value">฿${fmtK(totalOrg)}</div><div class="kpi-change neutral">${rangeLabel}</div></div>
+        <div class="kpi-card"><div class="kpi-emoji">📊</div><div class="kpi-label">ยอด Paid รวม</div><div class="kpi-value">฿${fmtK(totalAd)}</div><div class="kpi-change neutral">${rangeLabel}</div></div>
       `;
     }
   }
 
+  // Chart colors — highlight selected month, fade others
+  const barOrgColors = monthly.map((m,i) =>
+    highlightIdx === -1 || i === highlightIdx ? COLORS.green : 'rgba(15,155,106,0.25)'
+  );
+  const barAdColors = monthly.map((m,i) =>
+    highlightIdx === -1 || i === highlightIdx ? COLORS.orange : 'rgba(45,91,227,0.20)'
+  );
+  const trendColors = monthly.map((m,i) =>
+    highlightIdx === -1 || i === highlightIdx ? COLORS.green : 'rgba(15,155,106,0.3)'
+  );
+
   charts['orgBar'] = new Chart(document.getElementById('chartOrgBar'), {
     type: 'bar',
     data: { labels: monthly.map(m=>m.label), datasets: [
-      { label:'Organic', data: monthly.map(m=>m.orgGmv), backgroundColor: COLORS.green, borderRadius:4 },
-      { label:'Paid', data: monthly.map(m=>m.adGmv), backgroundColor: COLORS.orange, borderRadius:4 }
+      { label:'Organic', data: monthly.map(m=>m.orgGmv), backgroundColor: barOrgColors, borderRadius:4 },
+      { label:'Paid',    data: monthly.map(m=>m.adGmv),  backgroundColor: barAdColors,  borderRadius:4 }
     ]},
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
       scales:{ x:{stacked:true}, y:{stacked:true, ticks:{callback: v => '฿'+fmtK(v),font:{size:11}}, grid:{color:'rgba(0,0,0,0.05)'}} } }
@@ -1754,14 +1826,31 @@ function initOrganicCharts() {
 
   charts['orgTrend'] = new Chart(document.getElementById('chartOrgTrend'), {
     type:'line',
-    data:{ labels: monthly.map(m=>m.label), datasets:[{ label:'% Organic', data: monthly.map(m=>m.orgPct), borderColor: COLORS.green, backgroundColor:'rgba(15,155,106,0.1)', borderWidth:2.5, pointRadius:6, pointBackgroundColor:COLORS.green, fill:true, tension:0.3 }] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+    data:{ labels: monthly.map(m=>m.label), datasets:[{
+      label:'% Organic',
+      data: monthly.map(m=>m.orgPct),
+      borderColor: COLORS.green,
+      backgroundColor:'rgba(15,155,106,0.08)',
+      borderWidth:2.5,
+      pointRadius: monthly.map((_,i) => highlightIdx === -1 || i === highlightIdx ? 7 : 4),
+      pointBackgroundColor: trendColors,
+      fill:true, tension:0.3
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:11}},grid:{color:'rgba(0,0,0,0.05)'}} } }
   });
 
   charts['orgHour'] = new Chart(document.getElementById('chartOrgHour'), {
     type:'bar',
-    data:{ labels: hourly.map(h=>h.hour+':00'), datasets:[{ label:'% Organic', data: hourly.map(h=>h.orgPct), backgroundColor: hourly.map(h=>h.orgPct>50?'rgba(15,155,106,0.8)':h.orgPct>25?'rgba(15,155,106,0.4)':'rgba(238,77,45,0.3)'), borderRadius:3 }] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{font:{size:9},maxRotation:45,autoSkip:false}}, y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}} } }
+    data:{ labels: hourly.map(h=>h.hour+':00'), datasets:[{
+      label:'% Organic',
+      data: hourly.map(h=>h.orgPct),
+      backgroundColor: hourly.map(h=>h.orgPct>50?'rgba(15,155,106,0.8)':h.orgPct>25?'rgba(15,155,106,0.4)':'rgba(45,91,227,0.25)'),
+      borderRadius:3
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{ticks:{font:{size:9},maxRotation:45,autoSkip:false}},
+               y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}} } }
   });
 
   // Insights
@@ -1771,16 +1860,23 @@ function initOrganicCharts() {
     ins.innerHTML = `
       <div class="insight-card"><div class="insight-icon green">🌱</div><div class="insight-text"><div class="label">ชั่วโมง organic ดีสุด</div><div class="value">${bestOrgHour.hour}:00 น. (${bestOrgHour.orgPct}%)</div><div class="desc">ช่วงนี้ลด paid ได้ ลูกค้า discover ช่องเองมากที่สุด</div></div></div>
       <div class="insight-card"><div class="insight-icon orange">${diff>0?'📈':diff<0?'📉':'❓'}</div><div class="insight-text"><div class="label">Trend organic</div><div class="value">${diff!==null?(diff>=0?'เพิ่มขึ้น ':'ลดลง ')+Math.abs(diff)+'%':'ยังไม่มีข้อมูล'}</div><div class="desc">${diff>0?'ดี! organic กำลังเติบโต — ช่องกำลังติด':diff<0?'ระวัง organic ลดลง — ต้องเพิ่ม content quality':'รอข้อมูลอีกเดือนเพื่อบอก trend'}</div></div></div>
-      <div class="insight-card"><div class="insight-icon gold">💡</div><div class="insight-text"><div class="label">คำแนะนำ</div><div class="value">${score>=60?'รักษา momentum':score>=35?'เพิ่ม engagement':'สร้าง organic ก่อน'}</div><div class="desc">${score>=60?'ช่องกำลังแข็งแกร่ง — focus ที่ conversion มากกว่า acquisition':score>=35?'ทำ content ที่ shareable เช่น before/after, demo สินค้า':'เพิ่มความสม่ำเสมอในการไลฟ์ และตอบ comment ให้มากขึ้น'}</div></div></div>
+      <div class="insight-card"><div class="insight-icon gold">💡</div><div class="insight-text"><div class="label">คำแนะนำ</div><div class="value">${score>=60?'รักษา momentum':score>=35?'เพิ่ม engagement':'สร้าง organic ก่อน'}</div><div class="desc">${score>=60?'ช่องกำลังแข็งแกร่ง — focus ที่ conversion':score>=35?'ทำ content ที่ shareable เช่น before/after, demo':'เพิ่มความสม่ำเสมอในการไลฟ์ และตอบ comment ให้มากขึ้น'}</div></div></div>
     `;
   }
 
   const tbl = document.getElementById('orgTable');
   if (tbl) {
-    tbl.innerHTML = monthly.map(m => {
+    tbl.innerHTML = monthly.map((m,i) => {
+      const isHighlight = highlightIdx === -1 || i === highlightIdx;
       const tagC = m.orgPct>=60?'tag-green':m.orgPct>=35?'tag-gold':m.orgPct>0?'tag-orange':'tag-gray';
       const status = m.orgPct>=60?'ช่องติด 🔥':m.orgPct>=35?'กำลังเติบโต':m.orgPct>0?'ต้องพัฒนา':'ไม่มีข้อมูล';
-      return `<tr><td>${m.label}</td><td>฿${(m.orgGmv||0).toLocaleString()}</td><td>฿${(m.adGmv||0).toLocaleString()}</td><td>${m.orgPct||0}%</td><td><span class="tag ${tagC}">${status}</span></td></tr>`;
+      return `<tr style="${isHighlight?'':'opacity:0.45'}">
+        <td>${m.label}</td>
+        <td>฿${fmtK(m.orgGmv||0)}</td>
+        <td>฿${fmtK(m.adGmv||0)}</td>
+        <td>${m.orgPct||0}%</td>
+        <td><span class="tag ${tagC}">${status}</span></td>
+      </tr>`;
     }).join('');
   }
 }
