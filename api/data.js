@@ -115,12 +115,13 @@ async function fetchChannel(sheetId, sheetName, apiKey, idx) {
   return {
     sheetId,
     channelName,
-    monthly:  buildMonthly(parsed),
-    hourly:   buildHourly(parsed),
-    hosts:    buildHosts(parsed),
-    daily:    buildDaily(parsed),
-    campaign: buildCampaign(parsed),
-    organic:  buildOrganic(parsed),
+    monthly:   buildMonthly(parsed),
+    hourly:    buildHourly(parsed),
+    hosts:     buildHosts(parsed),
+    daily:     buildDaily(parsed),
+    campaign:  buildCampaign(parsed),
+    organic:   buildOrganic(parsed),
+    adsByDay:  buildAdsByDay(parsed),
   };
 }
 
@@ -261,14 +262,42 @@ function buildHostsForRows(rows) {
   const map = {};
   rows.forEach(r => {
     const n = r.host||"ไม่ระบุ";
-    if (!map[n]) map[n]={name:n,sales:0,orders:0,cart:0,hours:0,sessions:new Set()};
-    map[n].sales+=r.gmvHr; map[n].orders+=r.ordHr; map[n].cart+=r.cartHr;
+    if (!map[n]) map[n] = {
+      name:n, sales:0, orders:0, cart:0, hours:0, sessions:new Set(),
+      // Track total gmvHr per time slot to calculate best performing period
+      slotSales: { "ดึก":0, "เช้า":0, "บ่าย":0, "เย็น":0 }
+    };
+    map[n].sales  += r.gmvHr;
+    map[n].orders += r.ordHr;
+    map[n].cart   += r.cartHr;
     map[n].sessions.add(r.session);
-    if (r.gmvHr>0||r.hour>=0) map[n].hours++;
+    if (r.gmvHr > 0 || r.hour >= 0) map[n].hours++;
+    // Accumulate sales by time slot
+    if (r.gmvHr > 0 && r.hour >= 0) {
+      const slot = r.hour < 6 ? "ดึก" : r.hour < 12 ? "เช้า" : r.hour < 18 ? "บ่าย" : "เย็น";
+      map[n].slotSales[slot] += r.gmvHr;
+    }
   });
-  return Object.values(map)
-    .map(h=>({...h,sessions:h.sessions.size,avgPerHour:h.hours?Math.round(h.sales/h.hours):0}))
-    .sort((a,b)=>b.sales-a.sales);
+
+  return Object.values(map).map(h => {
+    // Find top 2 time slots by total sales for this host
+    const slotEntries = Object.entries(h.slotSales).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+    const best = slotEntries.length >= 2
+      ? `${slotEntries[0][0]} / ${slotEntries[1][0]}`
+      : slotEntries.length === 1
+        ? slotEntries[0][0]
+        : "—";
+    return {
+      name: h.name,
+      sales: h.sales,
+      orders: h.orders,
+      cart: h.cart,
+      hours: h.hours,
+      sessions: h.sessions.size,
+      avgPerHour: h.hours ? Math.round(h.sales / h.hours) : 0,
+      best,
+    };
+  }).sort((a,b) => b.sales - a.sales);
 }
 
 function buildDaily(rows) {
@@ -307,6 +336,50 @@ function buildCampaign(rows) {
     const count=Object.keys(c.days).length;
     const avgPerDay=count?Math.round(c.total/count):0;
     return{label:c.label,count,total:Math.round(c.total),avgPerDay,vsNormal:normalAvg>0?Math.round((avgPerDay/normalAvg-1)*100):0};
+  });
+}
+
+// ─── Ads / ROAS breakdown by day type ──────────────────────
+// ROAS per day-type = sum(gmvHr for that day) / sum(adHr for that day)
+// This is the "total sales ÷ total ad spend" method requested.
+function buildAdsByDay(rows) {
+  const DOUBLE=new Set(["04-04","05-05","06-06","07-07","08-08","09-09","10-10","11-11","12-12"]);
+  const PAYDAY=new Set(["04-25","05-25","06-25","07-25"]);
+  const MID=new Set(["04-15","05-15","06-15","07-15"]);
+
+  const cats = {
+    double_day: { label:"Double Day",     sales:0, ad:0, days:new Set() },
+    payday:     { label:"Payday (25)",    sales:0, ad:0, days:new Set() },
+    midmonth:   { label:"Midmonth (15)",  sales:0, ad:0, days:new Set() },
+    end_month:  { label:"ปลายเดือน 28-31",sales:0, ad:0, days:new Set() },
+    normal:     { label:"วันปกติ",         sales:0, ad:0, days:new Set() },
+  };
+
+  rows.forEach(r => {
+    if (!r.date) return;
+    const mmdd = r.date.slice(5);
+    const dd   = parseInt(r.date.slice(8));
+    let key = "normal";
+    if      (DOUBLE.has(mmdd)) key = "double_day";
+    else if (PAYDAY.has(mmdd)) key = "payday";
+    else if (MID.has(mmdd))    key = "midmonth";
+    else if (dd >= 28)         key = "end_month";
+    cats[key].sales += r.gmvHr;
+    cats[key].ad    += r.adHr;
+    cats[key].days.add(r.date);
+  });
+
+  return Object.values(cats).map(c => {
+    const roas = c.ad > 0 ? Math.round(c.sales / c.ad * 10) / 10 : 0;
+    return {
+      label:    c.label,
+      sales:    Math.round(c.sales),
+      adSpend:  Math.round(c.ad),
+      roas,
+      dayCount: c.days.size,
+      avgSalesPerDay: c.days.size ? Math.round(c.sales / c.days.size) : 0,
+      avgAdPerDay:    c.days.size ? Math.round(c.ad    / c.days.size) : 0,
+    };
   });
 }
 
@@ -425,7 +498,25 @@ function mergeChannels(channels) {
     healthColor: avgHealth>=60?"green":avgHealth>=35?"gold":"orange",
   };
 
-  return { channelName:"รวมทุกช่อง", monthly, hourly, hosts, daily, organic, campaign: channels[0].campaign };
+  // Merge adsByDay: combine sales+ad totals per day-type label across channels,
+  // then recalculate ROAS from the merged totals so numbers are consistent.
+  const adsDayMap = {};
+  channels.forEach(ch => {
+    (ch.adsByDay||[]).forEach(d => {
+      if (!adsDayMap[d.label]) adsDayMap[d.label] = { label:d.label, sales:0, adSpend:0, dayCount:0 };
+      adsDayMap[d.label].sales    += d.sales;
+      adsDayMap[d.label].adSpend  += d.adSpend;
+      adsDayMap[d.label].dayCount += d.dayCount;
+    });
+  });
+  const adsByDay = Object.values(adsDayMap).map(d => ({
+    ...d,
+    roas:           d.adSpend > 0 ? Math.round(d.sales / d.adSpend * 10) / 10 : 0,
+    avgSalesPerDay: d.dayCount ? Math.round(d.sales   / d.dayCount) : 0,
+    avgAdPerDay:    d.dayCount ? Math.round(d.adSpend / d.dayCount) : 0,
+  }));
+
+  return { channelName:"รวมทุกช่อง", monthly, hourly, hosts, daily, organic, campaign: channels[0].campaign, adsByDay };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -434,4 +525,4 @@ function mergeChannels(channels) {
 function num(v){if(v==null||v==="")return 0;const n=parseFloat(String(v).replace(/,/g,""));return isNaN(n)?0:n;}
 function clean(v){return String(v||"").trim();}
 function fmtDate(v){if(!v)return"";const m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(m)return`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;return v;}
-function emptyChannel(id,idx){return{sheetId:id,channelName:`ช่อง ${idx+1}`,monthly:[],hourly:[],hosts:{all:[],byMonth:[]},daily:[],campaign:[],organic:{monthly:[],hourly:[],channelHealthScore:0,healthLabel:"ไม่มีข้อมูล",healthColor:"gray"}};}
+function emptyChannel(id,idx){return{sheetId:id,channelName:`ช่อง ${idx+1}`,monthly:[],hourly:[],hosts:{all:[],byMonth:[]},daily:[],campaign:[],organic:{monthly:[],hourly:[],channelHealthScore:0,healthLabel:"ไม่มีข้อมูล",healthColor:"gray"},adsByDay:[]};}
