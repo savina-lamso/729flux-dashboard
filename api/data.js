@@ -11,28 +11,40 @@ export default async function handler(req, res) {
   const API_KEY = process.env.GOOGLE_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "Missing GOOGLE_API_KEY" });
 
-  // Support multiple channels via query param: ?channels=ID1,ID2,ID3
-  // or single: ?sheetId=ID  (backward compat)
+  // Support multiple channels via query param:
+  //   ?channels=SHEETID1:TABNAME1,SHEETID2:TABNAME2
+  // or legacy:
+  //   ?channels=ID1,ID2  (uses SHEET_NAME env for all)
+  //   ?sheetId=ID        (backward compat)
+  const DEFAULT_SHEET_NAME = process.env.SHEET_NAME || "น้องจดจิ";
   const channelParam = req.query.channels || req.query.sheetId || process.env.SHEET_ID || "";
-  const SHEET_NAME   = process.env.SHEET_NAME || "น้องจดจิ";
   const channelIds   = channelParam.split(",").map(s => s.trim()).filter(Boolean);
 
   if (!channelIds.length) return res.status(400).json({ error: "No sheet ID provided" });
 
+  // Parse each entry as "SHEETID:TABNAME" or plain "SHEETID"
+  const channels = channelIds.map((entry, idx) => {
+    const colonIdx = entry.indexOf(":");
+    if (colonIdx > 0) {
+      return { sheetId: entry.slice(0, colonIdx), sheetName: entry.slice(colonIdx + 1) };
+    }
+    return { sheetId: entry, sheetName: DEFAULT_SHEET_NAME };
+  });
+
   try {
-    // Fetch all channels in parallel
     const channelDataArr = await Promise.all(
-      channelIds.map((id, idx) => fetchChannel(id, SHEET_NAME, API_KEY, idx))
+      channels.map(({ sheetId, sheetName }, idx) =>
+        fetchChannel(sheetId, sheetName, API_KEY, idx)
+      )
     );
 
-    // Merge or return individually
     const combined = mergeChannels(channelDataArr);
 
     res.setHeader("Cache-Control", "s-maxage=180, stale-while-revalidate=60");
     return res.status(200).json({
       lastUpdated: new Date().toISOString(),
-      channels: channelDataArr,   // per-channel data
-      combined,                   // merged across all channels
+      channels: channelDataArr,
+      combined,
     });
   } catch (err) {
     console.error(err);
