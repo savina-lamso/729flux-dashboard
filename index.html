@@ -966,7 +966,7 @@ body {
               <div class="page-title">ผลงานทีมไลฟ์</div>
               <span class="jodji-chip">ใครเก่งสุดวันนี้? 🏆</span>
             </div>
-            <div class="page-sub">Top 5 ประสิทธิภาพแยกตาม host</div>
+            <div class="page-sub">Top 5 ประสิทธิภาพแยกตาม host — รวมทุกช่อง</div>
           </div>
         </div>
         <div class="jodji-ph-right">
@@ -1246,10 +1246,11 @@ body {
       </div>
 
       <div class="chart-card">
-        <div class="card-title" style="margin-bottom:14px">วิธีหา Sheet ID</div>
+        <div class="card-title" style="margin-bottom:14px">วิธีหา Sheet ID และชื่อ Tab</div>
         <div style="font-size:13px;color:var(--text2);line-height:1.8">
-          เปิด Google Sheet ของช่อง → ดู URL → Sheet ID คือส่วนที่อยู่ระหว่าง <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/d/</code> และ <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/edit</code><br>
+          <strong>Sheet ID:</strong> เปิด Google Sheet → ดู URL → ส่วนที่อยู่ระหว่าง <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/d/</code> และ <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">/edit</code><br>
           ตัวอย่าง: <span style="color:var(--text3)">docs.google.com/spreadsheets/d/<strong>1qYnD1d...FFo8</strong>/edit</span><br><br>
+          <strong>ชื่อ Tab:</strong> ดูจากแท็บด้านล่างของ Google Sheet เช่น <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">729flux</code> หรือ <code style="background:var(--orange-pale);color:var(--orange);padding:1px 6px;border-radius:5px">MAHA</code><br><br>
           ⚠️ ต้องตั้งค่า Sheet เป็น "Anyone with the link can view" ก่อนใช้งาน
         </div>
       </div>
@@ -1297,10 +1298,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /* ==================== FETCH ==================== */
 async function loadAllData() {
-  const sheetIds = channelsCfg.map(c => c.sheetId).filter(Boolean);
+  const validCfg = channelsCfg.filter(c => c.sheetId);
   document.getElementById("lastUpdate").textContent = "กำลังโหลด...";
 
-  if (!sheetIds.length) {
+  if (!validCfg.length) {
     RAW = buildDemoRaw();
     mapActiveChannelToData();
     refreshCurrentPage();
@@ -1309,7 +1310,11 @@ async function loadAllData() {
   }
 
   try {
-    const res = await fetch(`/api/data?channels=${sheetIds.join(",")}&t=${Date.now()}`);
+    // Build "SHEETID:TABNAME" per channel so backend knows which tab to read
+    const channelParam = validCfg
+      .map(c => c.sheetName ? `${c.sheetId}:${c.sheetName}` : c.sheetId)
+      .join(",");
+    const res = await fetch(`/api/data?channels=${channelParam}&t=${Date.now()}`);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
@@ -1409,6 +1414,12 @@ function mapActiveChannelToData() {
   DATA.hostsAll = mapHostArr(hostsRaw.all);
   DATA.hostsByMonth = (hostsRaw.byMonth||[]).map(m => ({ month: m.month, hosts: mapHostArr(m.hosts) }));
   DATA.hosts = DATA.hostsAll; // default view = all-time, kept for backward compatibility
+
+  // Combined hosts (across ALL channels) — always used on the ผลงานทีมไลฟ์ page
+  // regardless of which channel is selected in the topbar dropdown.
+  const combinedRaw = RAW && RAW.combined ? (RAW.combined.hosts || { all: [], byMonth: [] }) : hostsRaw;
+  DATA.combinedHostsAll = mapHostArr(combinedRaw.all);
+  DATA.combinedHostsByMonth = (combinedRaw.byMonth||[]).map(m => ({ month: m.month, hosts: mapHostArr(m.hosts) }));
 
   const org = d.organic || {};
   DATA.organic = {
@@ -2018,11 +2029,14 @@ function initHostCharts() {
   // Month filter
   const sel = document.getElementById('hostMonthFilter');
   const selMonth = sel ? sel.value : 'all';
+
+  // ⚡ Always use COMBINED hosts (all channels) regardless of topbar channel selector
+  // เพราะหน้านี้ต้องการภาพรวมทีมทั้งหมด ไม่แยกช่อง
   let sourceHosts;
   if (selMonth === 'all') {
-    sourceHosts = DATA.hostsAll || DATA.hosts || [];
+    sourceHosts = DATA.combinedHostsAll || DATA.hostsAll || DATA.hosts || [];
   } else {
-    const monthEntry = (DATA.hostsByMonth||[]).find(m => m.month === selMonth);
+    const monthEntry = (DATA.combinedHostsByMonth||DATA.hostsByMonth||[]).find(m => m.month === selMonth);
     sourceHosts = monthEntry ? monthEntry.hosts : [];
   }
 
@@ -2213,16 +2227,17 @@ function initAdsCharts() {
 function renderChannelInputRows() {
   const list = document.getElementById('channelInputList');
   if (!list) return;
-  if (!channelsCfg.length) channelsCfg = [{ name: '729flux', sheetId: '' }];
+  if (!channelsCfg.length) channelsCfg = [{ name: '729flux', sheetId: '', sheetName: '729flux' }];
   list.innerHTML = channelsCfg.map((c,i) => `
-    <div style="display:flex;gap:8px;align-items:center">
-      <input class="select-styled" style="flex:1;min-width:100px" placeholder="ชื่อช่อง" value="${c.name||''}" oninput="channelsCfg[${i}].name=this.value">
-      <input class="select-styled" style="flex:2" placeholder="Sheet ID" value="${c.sheetId||''}" oninput="channelsCfg[${i}].sheetId=this.value.trim()">
-      ${channelsCfg.length>1 ? `<button class="btn-primary" style="background:var(--red-bg);color:var(--red);padding:8px 12px" onclick="removeChannelRow(${i})">✕</button>` : ''}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input class="select-styled" style="flex:1;min-width:90px" placeholder="ชื่อช่อง" value="${c.name||''}" oninput="channelsCfg[${i}].name=this.value">
+      <input class="select-styled" style="flex:2;min-width:160px" placeholder="Sheet ID" value="${c.sheetId||''}" oninput="channelsCfg[${i}].sheetId=this.value.trim()">
+      <input class="select-styled" style="flex:1;min-width:90px" placeholder="ชื่อ Tab ใน Sheet" value="${c.sheetName||''}" oninput="channelsCfg[${i}].sheetName=this.value.trim()">
+      ${channelsCfg.length>1 ? `<button class="btn-primary" style="background:var(--red-bg);color:var(--red);padding:8px 12px;flex-shrink:0" onclick="removeChannelRow(${i})">✕</button>` : ''}
     </div>
   `).join('');
 }
-function addChannelRow() { channelsCfg.push({ name:'ช่องใหม่', sheetId:'' }); renderChannelInputRows(); }
+function addChannelRow() { channelsCfg.push({ name:'ช่องใหม่', sheetId:'', sheetName:'' }); renderChannelInputRows(); }
 function removeChannelRow(i) { channelsCfg.splice(i,1); renderChannelInputRows(); }
 
 async function saveChannelsAndLoad() {
