@@ -913,7 +913,8 @@ function applyUrl(){
   if(u) API.url=u; if(t) API.token=t;
   loadFromSheet();
 }
-async function loadFromSheet(){
+async function loadFromSheet(retries){
+  retries = (retries===undefined)?0:retries;
   setSync('กำลังโหลด...','#E8B14C');
   try{
     const from=isoOf(new Date(Date.now()-183*864e5)), to=isoOf(new Date(Date.now()+31*864e5));
@@ -938,7 +939,10 @@ async function loadFromSheet(){
       HOURS_OVERRIDE[store+'|'+fmtD(dOfISO(r['วันที่']))]={open:+r['เปิด'],close:+r['ปิด']};});
     runAndRender();
     setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
-  }catch(err){ setSync('ผิดพลาด: '+err.message+' (ถ้าขึ้น fetch ให้เช็คว่า Deploy = Anyone)','#D64550'); }
+  }catch(err){
+    if(retries>0){ setSync('กำลังลองใหม่...','#E8B14C'); setTimeout(()=>loadFromSheet(retries-1), 1500); return; }
+    setSync('ผิดพลาด: '+err.message,'#D64550');
+  }
 }
 
 async function saveEmployeesToSheet(){
@@ -988,7 +992,7 @@ async function saveWeekToSheet(){
 
 runAndRender();
 try{document.getElementById('urlInput').value=API.url;document.getElementById('tokenInput').value=API.token;}catch(_){}
-loadFromSheet();
+loadFromSheet(3);
 </script>
 </body>
 </html>
