@@ -126,6 +126,7 @@ async function fetchChannel(sheetId, sheetName, apiKey, idx) {
 
   return {
     sheetId,
+    sheetName,    // ← ส่งกลับมาด้วย เพื่อให้ frontend match ได้ถูกต้องเมื่อ sheetId ซ้ำกัน
     channelName,
     monthly:   buildMonthly(parsed),
     hourly:    buildHourly(parsed),
