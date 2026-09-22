@@ -191,6 +191,9 @@ td.realedit .cell{cursor:pointer}
 <div class="wrap">
 
   <div id="syncBar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:16px;box-shadow:0 2px 8px rgba(58,40,80,.05)">
+    <span style="font-family:Prompt;font-weight:700;font-size:13px;color:var(--blue)">🏪 ร้าน:</span>
+    <select id="storePick2" onchange="switchStore(this.value)" style="font-family:Prompt;font-weight:600;font-size:13px;color:var(--blue);background:var(--blue-pale);border:1.5px solid var(--blue-mid);padding:7px 12px;border-radius:10px;cursor:pointer"></select>
+    <span style="width:1px;height:22px;background:var(--line)"></span>
     <span id="syncDot" style="width:10px;height:10px;border-radius:50%;background:#C9B8DC;flex:none"></span>
     <span id="syncStatus" style="font-family:Prompt;font-weight:600;font-size:13px;color:var(--text2)">ยังไม่ได้เชื่อม Sheet</span>
     <button onclick="loadFromSheet()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:var(--blue);border:none;cursor:pointer;background:var(--blue-pale);padding:7px 13px;border-radius:10px;box-shadow:0 2px 0 var(--blue-mid)">☁️ โหลดจาก Sheet</button>
@@ -720,8 +723,9 @@ function setView(v){
 }
 function switchStore(v){ CUR_STORE=v; clearCopy(); runAndRender(); }
 function renderStores(){
-  const sel=document.getElementById('storePick');
-  sel.innerHTML=STORES.map(s=>'<option'+(s===CUR_STORE?' selected':'')+'>'+s+'</option>').join('');
+  const opts=STORES.map(s=>'<option'+(s===CUR_STORE?' selected':'')+'>'+s+'</option>').join('');
+  const a=document.getElementById('storePick'); if(a)a.innerHTML=opts;
+  const b=document.getElementById('storePick2'); if(b)b.innerHTML=opts;
 }
 let LAST=null;
 function runAndRender(){
@@ -881,7 +885,7 @@ function renderWage(){
 
 // ================= เชื่อม Google Sheet (Apps Script) =================
 const API = {
-  url:'https://script.google.com/macros/s/AKfycbzbinyuEeHYCC2yBVaS4St509N7MBfI0o9kYjoDljBMHEwRLExdEk8YcFcZnYN0Kalm/exec',
+  url:'https://script.google.com/macros/s/AKfycbwSx8Coktr4JZ7dp2K1W_7_CaUBEeifUEMuPu8H_zymbNmiiNQFltiwMTeTGBIQxdd6/exec',
   token:'jodji-729'
 };
 function setSync(txt,color){document.getElementById('syncStatus').textContent=txt;
