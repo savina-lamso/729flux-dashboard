@@ -168,10 +168,20 @@ td.realedit .cell{cursor:pointer}
 </head>
 <body>
 
+<script>
+  // ถ้าฝังใน iframe (?embed=1) ให้ซ่อนหัวสีฟ้า (ใช้หัวของแดชบอร์ดแทน)
+  if(location.search.indexOf('embed=1')>=0){ document.documentElement.classList.add('embed'); }
+</script>
+<style>
+  html.embed .topbar{display:none}
+  html.embed body{padding-bottom:20px}
+  html.embed .wrap{padding-top:16px}
+</style>
+
 <div class="topbar">
   <div class="logo">🐻</div>
   <div>
-    <h1>ตารางไลฟ์ <span class="preview-tag">ตัวอย่าง เฟส 1</span></h1>
+    <h1>ตารางไลฟ์</h1>
     <div class="sub">จดจิ · Live Schedule</div>
   </div>
   <select class="store-pick" id="storePick" onchange="switchStore(this.value)"></select>
