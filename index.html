@@ -614,9 +614,9 @@ body {
       <button class="nav-item" onclick="setPage('hosts')">
         <span class="nav-icon">👥</span> ผลงานทีมไลฟ์
       </button>
-      <a href="/schedule.html" class="nav-item" style="text-decoration:none;">
+      <button class="nav-item" onclick="setPage('schedule')">
         <span class="nav-icon">📅</span> ตารางไลฟ์
-      </a>
+      </button>
       <button class="nav-item" onclick="setPage('ads')">
         <span class="nav-icon">📣</span> ค่าแอด & ROAS
       </button>
@@ -1257,6 +1257,12 @@ body {
           ⚠️ ต้องตั้งค่า Sheet เป็น "Anyone with the link can view" ก่อนใช้งาน
         </div>
       </div>
+    </div>
+
+    <!-- ====== PAGE: ตารางไลฟ์ ====== -->
+    <div id="page-schedule" class="page">
+      <iframe src="/schedule.html?embed=1" title="ตารางไลฟ์"
+        style="width:100%;height:calc(100vh - 120px);border:none;border-radius:16px"></iframe>
     </div>
 
   </main>
