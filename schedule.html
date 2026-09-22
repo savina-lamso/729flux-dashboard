@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตารางไลฟ์ · จดจิ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blue:#2D5BE3; --blue-light:#5578F0; --blue-pale:#EEF2FB; --blue-mid:#D4DFF5;
+  --pink:#E87BA0; --lavender:#C8A8E0; --accent:#E8A050;
+  --bg:#FBF8FA; --card:#FFFFFF;
+  --text:#3A2850; --text2:#7A6090; --text3:#B0A0C0;
+  --line:#ECE4F2; --night:#3A2850;
+  --ok:#4CAF82; --warn:#E8894C; --gap:#F4E3E8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--text);padding-bottom:60px}
+h1,h2,h3,.f{font-family:'Prompt',sans-serif}
+
+/* Topbar */
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 20px;
+  background:linear-gradient(135deg,var(--blue) 0%,var(--blue-light) 100%);
+  box-shadow:0 4px 0 #1A3BA8;color:#fff;position:sticky;top:0;z-index:20}
+.logo{width:38px;height:38px;border-radius:50%;background:#fff;display:grid;place-items:center;
+  font-size:22px;box-shadow:inset 0 -2px 4px rgba(0,0,0,.08)}
+.topbar h1{font-size:19px;font-weight:700;letter-spacing:.3px}
+.topbar .sub{font-size:12px;opacity:.85;font-family:'Sarabun'}
+.store-pick{margin-left:auto;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);
+  color:#fff;padding:7px 14px;border-radius:12px;font-family:'Prompt';font-size:13px;font-weight:500}
+
+.wrap{max-width:1400px;margin:0 auto;padding:18px}
+
+/* Week bar */
+.weekbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;
+  box-shadow:0 2px 8px rgba(58,40,80,.05);margin-bottom:16px}
+.wk-nav{width:36px;height:36px;border:none;border-radius:11px;cursor:pointer;
+  background:var(--blue-pale);color:var(--blue);font-size:18px;font-weight:700;
+  box-shadow:0 2px 0 var(--blue-mid);transition:transform .08s}
+.wk-nav:active{transform:translateY(2px);box-shadow:none}
+.wk-range{font-family:'Prompt';font-weight:600;font-size:15px}
+.wk-range small{display:block;font-family:'Sarabun';font-weight:400;color:var(--text2);font-size:12px}
+.badge{font-family:'Prompt';font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;
+  background:linear-gradient(135deg,var(--accent),#F0B860);color:#fff;box-shadow:0 2px 0 #C47B2E}
+.btn{margin-left:auto;font-family:'Prompt';font-weight:600;font-size:14px;color:#fff;border:none;
+  cursor:pointer;padding:10px 18px;border-radius:13px;
+  background:linear-gradient(135deg,var(--blue),var(--blue-light));box-shadow:0 3px 0 #1A3BA8;transition:transform .08s}
+.btn:active{transform:translateY(3px);box-shadow:none}
+.btn.ghost{background:var(--blue-pale);color:var(--blue);box-shadow:0 3px 0 var(--blue-mid);margin-left:8px}
+
+/* Table */
+.tablecard{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;
+  box-shadow:0 4px 16px rgba(58,40,80,.06);margin-bottom:20px}
+.scroll{overflow-x:auto}
+table.sched{border-collapse:collapse;width:100%;min-width:920px;font-size:13px}
+.sched thead th{background:linear-gradient(135deg,var(--blue),var(--blue-light));color:#fff;
+  font-family:'Prompt';font-weight:600;padding:11px 6px;position:sticky;top:0;font-size:13px}
+.sched thead th .d{font-size:11px;opacity:.85;font-weight:400;display:block}
+.sched thead th:first-child{width:96px}
+.sched td{border:1px solid var(--line);padding:0;text-align:center;height:34px}
+.timecell{font-family:'Prompt';font-weight:500;color:var(--text2);background:#FAF6FB;
+  font-size:12px;white-space:nowrap;padding:0 8px}
+.timecell.night{background:#EEE9F5;color:var(--blue)}
+.timecell.night::after{content:'🌙';font-size:10px;margin-left:3px}
+.cell{display:block;width:100%;height:100%;line-height:34px;font-family:'Prompt';font-weight:600;
+  font-size:12.5px;color:#4A3868;position:relative}
+.cell.closed{color:var(--text3);font-family:'Sarabun';font-weight:400;font-style:italic;font-size:11px}
+.cell.gap{background:var(--gap);color:var(--warn);font-weight:600}
+.cell .p{opacity:.55;font-size:10px;margin-left:3px}
+.cell.editable{cursor:pointer}
+.cell.editable:hover{filter:brightness(1.08);outline:2px solid rgba(255,255,255,.6);outline-offset:-2px}
+.cell.manual::before{content:'✎';position:absolute;left:3px;top:0;font-size:9px;opacity:.7}
+.cell.badcell{outline:2px dashed #D64550;outline-offset:-2px}
+
+/* popover */
+.pop{position:fixed;z-index:100;background:#fff;border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 8px 28px rgba(58,40,80,.22);padding:8px;min-width:180px;display:none}
+.pop h4{font-family:'Prompt';font-size:12px;color:var(--text2);padding:4px 8px 6px}
+.pop button{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;cursor:pointer;
+  padding:7px 8px;border-radius:9px;font-family:'Sarabun';font-size:13.5px;color:var(--text);text-align:left}
+.pop button:hover{background:var(--blue-pale)}
+.pop .sw{width:14px;height:14px;border-radius:5px;flex:none}
+.pop .clr{color:var(--warn)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);
+  background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(58,40,80,.25);
+  padding:14px 18px;max-width:90vw;width:420px;z-index:120;opacity:0;pointer-events:none;
+  transition:.25s;border-left:5px solid var(--ok)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{border-left-color:#D64550}
+.toast.warn{border-left-color:var(--warn)}
+.toast h5{font-family:'Prompt';font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.toast ul{margin:0 0 0 4px;padding:0;list-style:none;font-size:13px;line-height:1.7}
+.toast li::before{content:'•';color:var(--warn);margin-right:6px}
+.toast li.ok::before{content:'✓';color:var(--ok)}
+
+/* modal */
+.mask{position:fixed;inset:0;background:rgba(58,40,80,.35);z-index:110;display:none;
+  align-items:center;justify-content:center;padding:16px}
+.mask.show{display:flex}
+.modal{background:#fff;border-radius:20px;width:440px;max-width:100%;max-height:90vh;overflow:auto;
+  box-shadow:0 12px 40px rgba(58,40,80,.3)}
+.modal .mhead{background:linear-gradient(135deg,var(--blue),var(--blue-light));color:#fff;
+  padding:16px 20px;font-family:'Prompt';font-weight:700;font-size:16px;border-radius:20px 20px 0 0;
+  display:flex;justify-content:space-between;align-items:center}
+.modal .mhead button{background:rgba(255,255,255,.2);border:none;color:#fff;width:28px;height:28px;
+  border-radius:8px;cursor:pointer;font-size:16px}
+.modal .mbody{padding:18px 20px}
+.fld{margin-bottom:14px}
+.fld label{display:block;font-family:'Prompt';font-weight:500;font-size:13px;color:var(--text2);margin-bottom:5px}
+.fld input,.fld select{width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:10px;
+  font-family:'Sarabun';font-size:14px;color:var(--text);background:#fff}
+.fld input:focus,.fld select:focus{outline:none;border-color:var(--blue-light)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end}
+.chk{display:flex;flex-wrap:wrap;gap:6px}
+.chk label{display:inline-flex;align-items:center;gap:4px;font-family:'Sarabun';font-size:13px;
+  background:var(--blue-pale);padding:5px 10px;border-radius:9px;cursor:pointer;color:var(--text);margin:0}
+.chk input{width:auto}
+.mfoot{display:flex;gap:10px;padding:0 20px 18px}
+.mfoot button{flex:1;padding:11px;border:none;border-radius:12px;font-family:'Prompt';font-weight:600;
+  font-size:14px;cursor:pointer}
+.mfoot .save{background:linear-gradient(135deg,var(--blue),var(--blue-light));color:#fff;box-shadow:0 3px 0 #1A3BA8}
+.mfoot .del{background:#FBEAEA;color:#D64550;flex:0 0 auto;padding:11px 16px}
+.hint{font-size:11.5px;color:var(--text3);margin-top:3px}
+
+/* Legend + wage */
+.grid2{display:grid;grid-template-columns:1fr 1.4fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px;
+  box-shadow:0 4px 16px rgba(58,40,80,.06)}
+.panel h3{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:7px}
+.emp{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.emp:last-child{border:none}
+.dot{width:16px;height:16px;border-radius:6px;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.emp .nm{font-family:'Prompt';font-weight:500;font-size:14px}
+.emp .meta{margin-left:auto;font-size:11.5px;color:var(--text2);text-align:right}
+.wagetbl{width:100%;border-collapse:collapse;font-size:13px}
+.wagetbl th{font-family:'Prompt';font-weight:600;font-size:12px;color:var(--text2);
+  text-align:right;padding:7px 8px;border-bottom:2px solid var(--line)}
+.wagetbl th:first-child{text-align:left}
+.wagetbl td{padding:8px;border-bottom:1px dashed var(--line);text-align:right}
+.wagetbl td:first-child{text-align:left;font-family:'Prompt';font-weight:500}
+.wagetbl .total{font-family:'Prompt';font-weight:700;color:var(--blue)}
+.wagetbl tfoot td{border-top:2px solid var(--blue-mid);font-family:'Prompt';font-weight:700;
+  color:var(--blue);font-size:14px;padding-top:10px}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'Prompt';font-weight:500}
+.note{font-size:12px;color:var(--text2);margin-top:10px;line-height:1.6}
+.note b{color:var(--text)}
+.preview-tag{display:inline-block;background:var(--gap);color:var(--pink);font-family:'Prompt';
+  font-weight:600;font-size:11px;padding:3px 10px;border-radius:20px;margin-left:8px}
+.viewtabs{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.vtab{font-family:'Prompt';font-weight:600;font-size:14px;border:none;cursor:pointer;
+  padding:9px 18px;border-radius:12px;background:#fff;color:var(--text2);border:1.5px solid var(--line)}
+.vtab.active{background:linear-gradient(135deg,var(--blue),var(--blue-light));color:#fff;
+  border-color:transparent;box-shadow:0 3px 0 #1A3BA8}
+.vtab.real.active{background:linear-gradient(135deg,var(--ok),#5FC896);box-shadow:0 3px 0 #2E7D57}
+.vhint{font-size:12px;color:var(--text2)}
+.cell.two{display:flex;flex-direction:column;line-height:1.15;padding:2px 0;height:auto;min-height:34px;justify-content:center}
+.cell.two span{font-size:11px}
+.cell.half{font-size:9px;opacity:.85}
+td.realedit .cell{cursor:pointer}
+.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;box-shadow:inset 0 0 0 100px rgba(240,184,96,.25)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">🐻</div>
+  <div>
+    <h1>ตารางไลฟ์ <span class="preview-tag">ตัวอย่าง เฟส 1</span></h1>
+    <div class="sub">จดจิ · Live Schedule</div>
+  </div>
+  <select class="store-pick" id="storePick" onchange="switchStore(this.value)"></select>
+  <a href="/index.html" style="margin-left:8px;font-family:Prompt;font-weight:600;font-size:13px;color:#fff;text-decoration:none;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);padding:7px 14px;border-radius:12px">← แดชบอร์ด</a>
+</div>
+
+<div class="wrap">
+
+  <div id="syncBar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:16px;box-shadow:0 2px 8px rgba(58,40,80,.05)">
+    <span id="syncDot" style="width:10px;height:10px;border-radius:50%;background:#C9B8DC;flex:none"></span>
+    <span id="syncStatus" style="font-family:Prompt;font-weight:600;font-size:13px;color:var(--text2)">ยังไม่ได้เชื่อม Sheet</span>
+    <button onclick="loadFromSheet()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:var(--blue);border:none;cursor:pointer;background:var(--blue-pale);padding:7px 13px;border-radius:10px;box-shadow:0 2px 0 var(--blue-mid)">☁️ โหลดจาก Sheet</button>
+    <button onclick="saveWeekToSheet()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:#fff;border:none;cursor:pointer;background:linear-gradient(135deg,var(--ok),#5FC896);padding:7px 13px;border-radius:10px;box-shadow:0 2px 0 #2E7D57">💾 บันทึกสัปดาห์นี้</button>
+    <button onclick="saveEmployeesToSheet()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:#fff;border:none;cursor:pointer;background:linear-gradient(135deg,var(--blue),var(--blue-light));padding:7px 13px;border-radius:10px;box-shadow:0 2px 0 #1A3BA8">💾 บันทึกพนักงาน</button>
+    <button onclick="document.getElementById('urlRow').style.display=(document.getElementById('urlRow').style.display==='none'?'flex':'none')" style="font-family:Prompt;font-size:12.5px;color:var(--text2);border:none;cursor:pointer;background:none;padding:7px 6px">⚙️ ลิงก์</button>
+  </div>
+  <div id="urlRow" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-bottom:16px">
+    <span style="font-family:Prompt;font-size:12px;color:var(--text2);font-weight:600">Web app URL:</span>
+    <input id="urlInput" style="flex:1;min-width:240px;padding:7px 10px;border:1.5px solid var(--line);border-radius:9px;font-size:12px;font-family:Sarabun" placeholder="วาง URL ที่ลงท้าย /exec">
+    <input id="tokenInput" style="width:120px;padding:7px 10px;border:1.5px solid var(--line);border-radius:9px;font-size:12px;font-family:Sarabun" placeholder="token">
+    <button onclick="applyUrl()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:#fff;border:none;cursor:pointer;background:linear-gradient(135deg,var(--ok),#5FC896);padding:7px 14px;border-radius:10px">เชื่อมใหม่</button>
+  </div>
+
+
+  <div class="weekbar">
+    <button class="wk-nav" onclick="shiftWeek(-1)">‹</button>
+    <button class="wk-nav" onclick="shiftWeek(1)">›</button>
+    <div class="wk-range" id="wkRange">—<small id="wkNote"></small></div>
+    <span class="badge" id="wkBadge" style="display:none"></span>
+    <button class="btn" onclick="runAndRender()">✨ จัดตารางอัตโนมัติ</button>
+    <button class="btn ghost" onclick="today()">สัปดาห์นี้</button>
+  </div>
+  <div style="font-size:12px;color:var(--text2);margin:-6px 4px 14px">💡 คลิก <b>ช่องในตาราง</b> เพื่อสลับคน · คลิก <b>หัววัน</b> เพื่อตั้งเวลาเปิด-ปิดเฉพาะวัน · คลิก <b>ชื่อพนักงาน</b> เพื่อแก้ข้อมูล/วันลา</div>
+
+  <div class="viewtabs">
+    <button class="vtab active" id="vtPlan" onclick="setView('plan')">📋 ตารางแผน</button>
+    <button class="vtab" id="vtReal" onclick="setView('real')">✅ เข้างานจริง</button>
+    <button class="vtab" id="copyBtn" onclick="toggleCopy()" style="margin-left:auto">📋 โหมดก๊อป</button>
+  </div>
+  <div id="copyBar" style="display:none;background:#FFF6E9;border:1.5px solid #F0C98A;border-radius:12px;padding:9px 14px;margin-bottom:12px;font-size:13px;color:#8A5A1E;font-family:Sarabun">
+    <b id="copyStep">① คลิกช่องเริ่ม แล้วช่องจบ (วันเดียวกัน) เพื่อเลือกช่วง</b>
+    <button id="copyAct" onclick="doCopy()" style="display:none;margin-left:10px;border:none;background:linear-gradient(135deg,var(--accent),#F0B860);color:#fff;font-family:Prompt;font-weight:600;padding:5px 12px;border-radius:9px;cursor:pointer">ก๊อปช่วงนี้</button>
+    <button onclick="clearCopy()" style="margin-left:6px;border:none;background:#F3E3CC;color:#8A5A1E;font-family:Prompt;padding:5px 10px;border-radius:9px;cursor:pointer">ล้าง</button>
+  </div>
+
+  <div class="tablecard">
+    <div class="scroll"><table class="sched" id="schedTbl"></table></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="justify-content:space-between"><span>👥 พนักงาน & วันหยุด</span>
+        <button onclick="openEmp(-1)" style="font-family:Prompt;font-size:12px;font-weight:600;color:#fff;border:none;cursor:pointer;background:linear-gradient(135deg,var(--blue),var(--blue-light));padding:6px 12px;border-radius:10px;box-shadow:0 2px 0 #1A3BA8">+ เพิ่มพนักงาน</button></h3>
+      <div id="empList"></div>
+      <div class="note">
+        <b>คลิกที่ชื่อพนักงาน</b> เพื่อแก้/ลบ · ปุ่มบนขวาเพิ่มคนใหม่<br>
+        กรอก: ชื่อ · วันหยุด · ช่วงเวลาประจำ · ข้อจำกัด · ธนาคาร (สีระบบเลือกให้)
+      </div>
+    </div>
+    <div class="panel">
+      <h3>💰 สรุปค่าจ้างรายสัปดาห์ <span style="font-size:12px;color:var(--text2);font-family:Sarabun;font-weight:400">(โอนทุกวันจันทร์)</span></h3>
+      <table class="wagetbl" id="wageTbl"></table>
+      <div class="note">
+        ค่าจ้าง <b>50฿/ชม.</b> · กะดึก 00:00–06:00 <b>60฿/ชม.</b> 🌙<br>
+        คิดจาก <b>"เข้างานจริง"</b> · มาสายลงชื่อคู่ = คนละครึ่ง ชม. · แสดงเลขบัญชีไว้โอน
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="pop" id="pop"></div>
+<div class="toast" id="toast"></div>
+<div class="mask" id="empMask"><div class="modal" id="empModal"></div></div>
+<div class="mask" id="dayMask"><div class="modal" id="dayModal"></div></div>
+
+<script>
+// ---------- ข้อมูลตัวอย่าง (ของจริงดึงจาก Google Sheet) ----------
+const DAYS = ['จันทร์','อังคาร','พุธ','พฤหัส','ศุกร์','เสาร์','อาทิตย์'];
+// pref = ช่วงเวลาประจำ (ชอบ/ปกติ · ยืดหยุ่น) | con = ข้อจำกัด (ห้ามเด็ดขาด)
+let EMP = [
+  {name:'A', color:'#AEC8F5', off:0, sen:1, pref:{s:7, e:15}, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // เช้า 07-15 หยุด จ.
+  {name:'B', color:'#BCE3BC', off:1, sen:2, pref:{s:9, e:17}, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // สาย 09-17 หยุด อ.
+  {name:'C', color:'#F5CDA6', off:2, sen:3, pref:{s:12,e:20}, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // บ่าย 12-20 หยุด พ.
+  {name:'D', color:'#CDB8E8', off:3, sen:4, pref:{s:14,e:22}, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // เย็น 14-22 หยุด พฤ.
+  {name:'E', color:'#F5B8CE', off:4, sen:5, pref:{s:16,e:0 }, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // ค่ำ 16-24 หยุด ศ.
+  {name:'F', color:'#A6DCD6', off:5, sen:6, pref:{s:18,e:2 }, con:null, bank:'', acc:'', role:null, status:'ทำงาน', leaves:[]}, // ดึก 18-02 หยุด ส.
+];
+const PALETTE=['#AEC8F5','#BCE3BC','#F5CDA6','#CDB8E8','#F5B8CE','#A6DCD6','#F5D9A6','#C6D6F5','#E3C6E8','#B8E0EC','#EAD3AE','#C9E8C9'];
+function pickColor(){const used=EMP.map(e=>e.color);return PALETTE.find(c=>!used.includes(c))||PALETTE[EMP.length%PALETTE.length];}
+// อยู่ในช่วงประจำไหม (รองรับข้ามเที่ยงคืน เช่น 18–02)
+function inPref(e,h){ if(!e.pref)return true; const {s,e:en}=e.pref;
+  return s<en ? (h>=s&&h<en) : (h>=s||h<en); }
+function prefSpan(e){ if(!e.pref)return 24; const {s,e:en}=e.pref; return s<en?(en-s):((24-s)+en); }
+const RATE_DAY=50, RATE_NIGHT=60, MIN_DAY=6, SOFT_MAX=8, HARD_MAX=10, BLOCK_MAX=3, BLOCK_MIN=2;
+
+// ---------- วันที่ / สัปดาห์ ----------
+let weekStart = mondayOf(new Date(2026,8,11)); // 11 ก.ย. 2026
+function mondayOf(d){d=new Date(d);const g=(d.getDay()+6)%7;d.setDate(d.getDate()-g);d.setHours(0,0,0,0);return d;}
+function today(){weekStart=mondayOf(new Date(2026,8,11));runAndRender();}
+function shiftWeek(n){weekStart=new Date(weekStart);weekStart.setDate(weekStart.getDate()+n*7);runAndRender();}
+function fmtD(d){return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();}
+
+// ---------- แคมเปญ ----------
+function isCampaign(d){
+  const day=d.getDate(), mon=d.getMonth()+1;
+  if(day===mon) return 'Double '+mon+'.'+mon;      // double day
+  if(day===15) return 'Mid Month';
+  if(day===25) return 'Payday';
+  if(day===30||day===31||day===1) return 'สิ้นเดือน';
+  return null;
+}
+// วันที่ต้องไลฟ์ยาว = วันแคมเปญ หรือ วันก่อนวันแคมเปญ
+function longDay(d){
+  if(isCampaign(d)) return true;
+  const nx=new Date(d); nx.setDate(nx.getDate()+1);
+  return !!isCampaign(nx);
+}
+// ลำดับชั่วโมงของ "วันไลฟ์" หนึ่งวัน: 07:00 -> 06:00 ของวันถัดไป
+const DAY_ORDER=(()=>{const a=[];for(let h=7;h<=23;h++)a.push(h);for(let h=0;h<=6;h++)a.push(h);return a;})();
+const giOf=(h)=>DAY_ORDER.indexOf(h);   // ตำแหน่งชั่วโมงบนแกนเวลา (กันซ้อน/พักข้ามร้าน)
+
+// ---------- ร้าน ----------
+let STORES=['729flux','MAHA'];   // โหลดจาก Sheet ได้ภายหลัง
+let CUR_STORE='729flux';         // ร้านที่กำลังดู
+
+// ---------- override เวลาเปิด-ปิดเฉพาะวัน (แยกร้าน) ----------
+let HOURS_OVERRIDE={};  // key = store|fmtD(date) -> {open, close}
+function hoursBetween(o,c){const a=[];let h=o;for(let i=0;i<24;i++){a.push(h);h=(h+1)%24;if(h===c)break;}return a;}
+function storeHours(d, store){
+  const k=(store||CUR_STORE)+'|'+fmtD(d);
+  if(k in HOURS_OVERRIDE){const o=HOURS_OVERRIDE[k];return hoursBetween(o.open,o.close);}
+  if(longDay(d)) return DAY_ORDER.slice();          // แคมเปญ = เปิด 24 ชม.
+  const base=[]; for(let h=7;h<=23;h++)base.push(h); base.push(0); // ปกติ 07:00 -> 01:00
+  return base;
+}
+function storeLabel(d, store){
+  const hrs=storeHours(d, store||CUR_STORE); const o=hrs[0], c=(hrs[hrs.length-1]+1)%24;
+  return String(o).padStart(2,'0')+':00–'+String(c).padStart(2,'0')+':00';
+}
+
+// ---------- ตัวจัดตารางอัตโนมัติ (หลายร้าน จัดพร้อมกัน) ----------
+function buildSchedule(){
+  const dates=[]; for(let i=0;i<7;i++){const d=new Date(weekStart);d.setDate(d.getDate()+i);dates.push(d);}
+  const st = EMP.map(()=>({wk:0,night:0}));
+  const all = {}; STORES.forEach(s=>all[s]=[]);       // all[store][di] = {hours,row,date}
+  const dayHrsAll = [];                                // dayHrsAll[di][ei] = ชม.รวมทั้ง 2 ร้าน
+
+  dates.forEach((date,di)=>{
+    // เวลาเปิดของแต่ละร้านวันนี้
+    const hoursByStore={}; let N=0;
+    STORES.forEach(s=>{const hs=storeHours(date,s); hoursByStore[s]=hs; N+=hs.length;});
+    const rows={}; STORES.forEach(s=>rows[s]=new Array(hoursByStore[s].length).fill('gap'));
+
+    // ---- เลือกทีมของวันนี้ (ใช้ร่วมทุกร้าน) ----
+    let elig = EMP.map((e,ei)=>ei).filter(ei=>{
+      const e=EMP[ei];
+      if(e.status==='ลาออก') return false;
+      if(e.off===di) return false;
+      if((e.leaves||[]).includes(fmtD(date))) return false;
+      return true;
+    });
+    const conPen=ei=>(EMP[ei].con && EMP[ei].con.day===di)?1:0;
+    const sen=ei=>EMP[ei].sen||99;
+    elig.sort((a,b)=> (conPen(a)-conPen(b)) || (sen(a)-sen(b)) || (st[a].wk-st[b].wk) || (st[a].night-st[b].night) || (a-b));
+    let W = Math.max(1, Math.floor(N/MIN_DAY)); W = Math.min(W, elig.length);
+    const chosen = elig.slice(0, W);
+
+    const base=Math.floor(N/Math.max(W,1)), extra=N-base*Math.max(W,1);
+    const remain={}, dayH={}, tgt={}, firstG={}, lastG={}, lastEnd={}, busy={};
+    chosen.forEach((ei,idx)=>{ let t=base+(idx<extra?1:0); t=Math.min(t,HARD_MAX);
+      remain[ei]=t; tgt[ei]=t; dayH[ei]=0; lastEnd[ei]=-99; busy[ei]=new Set(); });
+
+    let supportEi=null;
+    if(W>=3){ const s=chosen.find(ei=>EMP[ei].role==='support'); if(s!==undefined) supportEi=s; }
+
+    const conOKh=(ei,h)=>{const e=EMP[ei];return !(e.con&&e.con.day===di&&!(h>=e.con.after&&h<=23));};
+    const spanOK=(ei,g1,g2)=>{ if(firstG[ei]===undefined) return true;
+      const f=Math.min(firstG[ei],g1), l=Math.max(lastG[ei],g2); return (l-f+1) <= (tgt[ei]+3); };
+    // วางบล็อกที่ร้าน s ตำแหน่ง p ยาว L
+    const put=(ei,s,p,L)=>{const hs=hoursByStore[s];
+      for(let k=0;k<L;k++){const h=hs[p+k],g=giOf(h); rows[s][p+k]=ei; busy[ei].add(g);
+        st[ei].wk++; if(h>=0&&h<6)st[ei].night++; dayH[ei]++;}
+      remain[ei]-=L;
+      const gStart=giOf(hs[p]), gEnd=giOf(hs[p+L-1]);
+      lastEnd[ei]=gEnd+1;
+      firstG[ei]=(firstG[ei]===undefined)?gStart:Math.min(firstG[ei],gStart);
+      lastG[ei]=(lastG[ei]===undefined)?gEnd:Math.max(lastG[ei],gEnd);};
+    // เช็คว่าวางได้ไหม (ทุกชั่วโมงในบล็อก: ไม่ชนเวลาอีกร้าน + ข้อจำกัด)
+    const canPlace=(ei,s,p,L)=>{const hs=hoursByStore[s];
+      if(remain[ei]<L || remain[ei]-L===1) return false;
+      if(dayH[ei]+L>HARD_MAX) return false;
+      const gStart=giOf(hs[p]); if(lastEnd[ei]===gStart) return false;   // พัก >=1 ชม.
+      let outPref=0;
+      for(let k=0;k<L;k++){const h=hs[p+k],g=giOf(h);
+        if(busy[ei].has(g)) return false;                                // ชนเวลาอีกร้าน
+        if(!conOKh(ei,h)) return false;
+        if(!inPref(EMP[ei],h)) outPref++;}
+      if(!spanOK(ei,gStart,giOf(hs[p+L-1]))) return false;
+      return {outPref};};
+
+    // ---- วางแบบไล่เวลา (interleave 2 ร้าน) ----
+    const maxLen=Math.max.apply(null, STORES.map(s=>hoursByStore[s].length));
+    for(let p=0; p<maxLen; p++){
+      STORES.forEach(s=>{
+        const hs=hoursByStore[s]; if(p>=hs.length) return;
+        if(rows[s][p]!=='gap') return;
+        let placed=false;
+        for(let L=BLOCK_MAX; L>=BLOCK_MIN && !placed; L--){
+          if(p+L>hs.length) continue;
+          const cands=[];
+          chosen.forEach(ei=>{ if(ei===supportEi) return;
+            const r=canPlace(ei,s,p,L); if(r) cands.push({ei,outPref:r.outPref}); });
+          if(!cands.length) continue;
+          const hasNight=hs.slice(p,p+L).some(h=>h>=0&&h<6);
+          cands.sort((a,b)=>(a.outPref-b.outPref)||(hasNight?st[a.ei].night-st[b.ei].night:0)||(remain[b.ei]-remain[a.ei])||(a.ei-b.ei));
+          put(cands[0].ei,s,p,L); placed=true;
+          // ซัพพอร์ตคั่น 1 ชม. (ร้านเดียวกัน)
+          if(supportEi!=null && p+L<hs.length && rows[s][p+L]==='gap'){
+            const g=giOf(hs[p+L]);
+            if(remain[supportEi]>0 && !busy[supportEi].has(g) && lastEnd[supportEi]!==g && conOKh(supportEi,hs[p+L])){
+              put(supportEi,s,p+L,1);
+            }
+          }
+        }
+      });
+    }
+
+    // ---- เก็บตก + ปิดช่องว่าง (ต่อร้าน) ----
+    STORES.forEach(s=>{const hs=hoursByStore[s];
+      for(let pass=0; pass<2; pass++){
+        for(let j=0;j<hs.length;j++){
+          if(rows[s][j]!=='gap') continue;
+          const h=hs[j], g=giOf(h);
+          const runLen=ei=>{let run=1,k=j-1;while(k>=0&&rows[s][k]===ei){run++;k--;}k=j+1;while(k<hs.length&&rows[s][k]===ei){run++;k++;}return run;};
+          let cs=chosen.filter(ei=>{
+            if(busy[ei].has(g)) return false;                       // ชนเวลาอีกร้าน
+            if(!conOKh(ei,h)) return false;
+            if(pass===0){ if(remain[ei]<=0) return false; if(runLen(ei)>BLOCK_MAX) return false; }
+            else { if(dayH[ei]>=HARD_MAX) return false; }            // รอบท้าย: เกิน 6 ได้
+            return true;
+          });
+          if(!cs.length) continue;
+          cs.sort((a,b)=>{const adjA=(rows[s][j-1]===a||rows[s][j+1]===a)?0:1, adjB=(rows[s][j-1]===b||rows[s][j+1]===b)?0:1;
+            return (adjA-adjB) || (remain[b]-remain[a]) || (dayH[a]-dayH[b]) || (a-b);});
+          const pk=cs[0]; rows[s][j]=pk; busy[pk].add(g); dayH[pk]++; if(remain[pk]>0)remain[pk]--;
+          st[pk].wk++; if(h>=0&&h<6)st[pk].night++;
+        }
+      }
+    });
+
+    STORES.forEach(s=>{ all[s][di]={hours:hoursByStore[s], row:rows[s], date}; });
+    dayHrsAll[di]=EMP.map((_,ei)=>dayH[ei]||0);
+  });
+
+  return {dates, all, st, dayHrsAll};
+}
+
+// ---------- โหมดก๊อป (เลือกช่วง → ก๊อป → วาง) ----------
+let COPY_MODE=false, SEL=null, CLIP=null; // SEL={di,h1,h2} CLIP={len,vals:[]}
+function toggleCopy(){
+  COPY_MODE=!COPY_MODE;
+  document.getElementById('copyBtn').className='vtab'+(COPY_MODE?' active':'');
+  document.getElementById('copyBar').style.display=COPY_MODE?'':'none';
+  clearCopy();
+}
+function clearCopy(){ SEL=null; CLIP=null;
+  const a=document.getElementById('copyAct'); if(a)a.style.display='none';
+  setCopyStep(CLIP?'② คลิกช่องปลายทาง (ช่องแรก) เพื่อวาง':'① คลิกช่องเริ่ม แล้วช่องจบ (วันเดียวกัน) เพื่อเลือกช่วง');
+  renderTable();
+}
+function setCopyStep(t){const s=document.getElementById('copyStep'); if(s)s.innerHTML=t;}
+// คลิกช่องตอนเปิดโหมดก๊อป (รองรับทั้งแผน/จริง)
+function copyClick(di,h){
+  const g=LAST.grid[di]; const idx=g.hours.indexOf(h); if(idx<0)return;
+  if(CLIP){ // วาง
+    for(let k=0;k<CLIP.len;k++){
+      const hh=g.hours[idx+k]; if(hh===undefined)break;
+      const key=dateKey(g.date,hh);
+      if(VIEW==='real') REAL[key]=CLIP.vals[k];
+      else OVERRIDES[key]=CLIP.vals[k];
+    }
+    runAndRender();
+    setCopyStep('✅ วางแล้ว! เลือกช่วงใหม่ได้เลย');
+    SEL=null; CLIP=null; document.getElementById('copyAct').style.display='none';
+    return;
+  }
+  if(!SEL || SEL.h2!=null){ SEL={di,h1:h,h2:null}; }
+  else if(SEL.di!==di){ SEL={di,h1:h,h2:null}; }
+  else { SEL.h2=h; }
+  if(SEL.h2!=null){
+    document.getElementById('copyAct').style.display='';
+    setCopyStep('เลือกช่วงแล้ว — กด "ก๊อปช่วงนี้" แล้วไปคลิกช่องปลายทาง');
+  }
+  renderTable();
+}
+function selIdxRange(){ // คืน [i1,i2] เรียงตามตำแหน่งจริงในวัน
+  const g=LAST.grid[SEL.di]; const a=g.hours.indexOf(SEL.h1), b=g.hours.indexOf(SEL.h2);
+  return [Math.min(a,b),Math.max(a,b)];
+}
+function doCopy(){
+  if(!SEL||SEL.h2==null)return;
+  const g=LAST.grid[SEL.di]; const [i1,i2]=selIdxRange();
+  CLIP={len:i2-i1+1, vals:[]};
+  for(let k=i1;k<=i2;k++){
+    if(VIEW==='real'){const r=resolveReal(SEL.di,g.hours[k]); CLIP.vals.push(r==='gap'?'gap':r.slice());}
+    else {const v=g.row[k]; CLIP.vals.push(v==='gap'?'gap':v);}
+  }
+  document.getElementById('copyAct').style.display='none';
+  setCopyStep('② คลิกช่องปลายทาง (ช่องแรก) เพื่อวาง '+CLIP.len+' ชม.');
+  renderTable();
+}
+function inSel(di,h){
+  if(!SEL||SEL.di!==di)return false;
+  const g=LAST.grid[di]; const idx=g.hours.indexOf(h); if(idx<0)return false;
+  if(SEL.h2==null) return g.hours.indexOf(SEL.h1)===idx;
+  const [i1,i2]=selIdxRange(); return idx>=i1&&idx<=i2;
+}
+
+// ---------- การแก้ด้วยมือ ----------
+let OVERRIDES={};                     // key = "store|d/m/yyyy|hour" -> empIndex | 'gap'
+function skey(store,d,h){return store+'|'+fmtD(d)+'|'+h;}
+function dateKey(d,h){return skey(CUR_STORE,d,h);}   // ใช้กับร้านที่กำลังดู
+
+// ใส่ override ทับ (ทุกร้าน) + คำนวณสถิติใหม่ + ตั้ง LAST.grid = ร้านที่กำลังดู
+function finalize(){
+  const st=EMP.map(()=>({wk:0,night:0}));
+  const dayHrs=LAST.dates.map(()=>EMP.map(()=>0));
+  STORES.forEach(store=>{
+    (LAST.all[store]||[]).forEach((g,di)=>{
+      g.hours.forEach((h,idx)=>{const k=skey(store,g.date,h); if(k in OVERRIDES) g.row[idx]=OVERRIDES[k];});
+      g.row.forEach((v,idx)=>{ if(typeof v==='number'){const h=g.hours[idx];
+        st[v].wk++; if(h>=0&&h<6)st[v].night++; dayHrs[di][v]++;}});
+    });
+  });
+  LAST.st=st;
+  LAST.dayHrs=dayHrs;
+  // ตั้งกริดของร้านที่กำลังดู + แนบ dayHrs (รวมทุกร้าน) ให้แต่ละวัน
+  LAST.grid = (LAST.all[CUR_STORE]||[]).map((g,di)=>Object.assign({},g,{dayHrs:dayHrs[di]}));
+}
+
+// ตรวจเงื่อนไขของเซลล์ (di,h) -> คืน array ปัญหา
+function validateCell(di,h){
+  const g=LAST.grid[di]; const idx=g.hours.indexOf(h); if(idx<0) return [];
+  const v=g.row[idx]; if(typeof v!=='number') return [];
+  const e=EMP[v]; const out=[];
+  if(e.off===di) out.push({lv:'err',m:'วันนี้เป็นวันหยุดประจำของ '+e.name});
+  if((e.leaves||[]).includes(fmtD(g.date))) out.push({lv:'err',m:e.name+' ลาวันนี้ (วันลาเพิ่ม)'});
+  if(e.con && e.con.day===di && h<e.con.after)
+    out.push({lv:'err',m:e.name+' มีข้อจำกัด: '+DAYS[di]+'เข้าหลัง '+e.con.after+':00 เท่านั้น'});
+  const dh=g.dayHrs[v];
+  if(dh>HARD_MAX) out.push({lv:'err',m:e.name+' วันนี้ '+dh+' ชม. เกินเพดานแข็ง '+HARD_MAX+' ชม.'});
+  else if(dh>SOFT_MAX) out.push({lv:'warn',m:e.name+' วันนี้ '+dh+' ชม. เกิน '+SOFT_MAX+' ชม. (ยังไม่เกิน '+HARD_MAX+')'});
+  if(dh>0 && dh<MIN_DAY) out.push({lv:'warn',m:e.name+' วันนี้ได้แค่ '+dh+' ชม. ต่ำกว่าขั้นต่ำ '+MIN_DAY+' ชม.'});
+  // ไลฟ์ติดกันเกิน 3 ชม.
+  let run=1,l=idx-1,r=idx+1;
+  while(l>=0&&g.row[l]===v){run++;l--;} while(r<g.row.length&&g.row[r]===v){run++;r++;}
+  if(run>BLOCK_MAX) out.push({lv:'warn',m:e.name+' ไลฟ์ติดกัน '+run+' ชม. ไม่ได้พัก (ควรไม่เกิน '+BLOCK_MAX+')'});
+  if(!inPref(e,h)) out.push({lv:'info',m:h+':00 อยู่นอกช่วงเวลาประจำของ '+e.name+' (ถ้าจำเป็นก็ไม่เป็นไร)'});
+  return out;
+}
+let PICK=null;
+function openPicker(di,h,ev){
+  ev.stopPropagation();
+  if(COPY_MODE){ copyClick(di,h); return; }
+  PICK={di,h};
+  const g=LAST.grid[di]; const idx=g.hours.indexOf(h); const cur=g.row[idx];
+  const next=(h+1)%24; const lbl=String(h).padStart(2,'0')+':00–'+String(next).padStart(2,'0')+':00';
+  let html='<h4>'+DAYS[di]+' '+lbl+'</h4>';
+  EMP.forEach((e,ei)=>{
+    const sel=(cur===ei)?' style="background:'+e.color+'18"':'';
+    html+='<button onclick="setCell('+ei+')"'+sel+'><span class="sw" style="background:'+e.color+'"></span>'+e.name+'</button>';
+  });
+  html+='<button class="clr" onclick="setCell(-1)"><span class="sw" style="background:var(--gap)"></span>ว่าง (ไม่มีคน)</button>';
+  html+='<button onclick="clearOverride()" style="color:var(--text3);border-top:1px solid var(--line);margin-top:4px;padding-top:9px">↺ คืนค่าอัตโนมัติ</button>';
+  const pop=document.getElementById('pop'); pop.innerHTML=html; pop.style.display='block';
+  const r=ev.currentTarget.getBoundingClientRect(); const pw=pop.offsetWidth,ph=pop.offsetHeight;
+  let x=r.left, y=r.bottom+6;
+  if(x+pw>innerWidth-8)x=innerWidth-pw-8; if(y+ph>innerHeight-8)y=r.top-ph-6;
+  pop.style.left=Math.max(8,x)+'px'; pop.style.top=Math.max(8,y)+'px';
+}
+function closePop(){document.getElementById('pop').style.display='none';PICK=null;}
+document.addEventListener('click',e=>{if(!e.target.closest('#pop')&&!e.target.closest('.editable'))closePop();});
+function setCell(ei){
+  if(!PICK)return; const {di,h}=PICK; const g=LAST.grid[di];
+  OVERRIDES[dateKey(g.date,h)] = (ei===-1)?'gap':ei;
+  closePop(); runAndRender(); showWarn(di,h);
+}
+function clearOverride(){
+  if(!PICK)return; const {di,h}=PICK; const g=LAST.grid[di];
+  delete OVERRIDES[dateKey(g.date,h)];
+  closePop(); runAndRender();
+}
+function showWarn(di,h){
+  const w=validateCell(di,h); const t=document.getElementById('toast');
+  const g=LAST.grid[di]; const idx=g.hours.indexOf(h); const v=g.row[idx];
+  const who=(typeof v==='number')?EMP[v].name:'ว่าง';
+  if(!w.length){
+    t.className='toast show'; t.innerHTML='<h5>✅ บันทึกการแก้ไข</h5><ul><li class="ok">ตั้ง '+who+' — ไม่ขัดเงื่อนไขใดๆ</li></ul>';
+  }else{
+    const hasErr=w.some(x=>x.lv==='err');
+    t.className='toast show '+(hasErr?'err':'warn');
+    t.innerHTML='<h5>'+(hasErr?'⛔ ขัดเงื่อนไข (ยืนยันทับแล้ว)':'⚠️ มีข้อควรระวัง')+'</h5><ul>'+
+      w.map(x=>'<li>'+x.m+'</li>').join('')+'</ul>';
+  }
+  clearTimeout(showWarn._t); showWarn._t=setTimeout(()=>t.className='toast',4200);
+}
+// ---------- จัดการพนักงาน ----------
+function openEmp(i){
+  const isNew=(i===-1);
+  const e=isNew?{name:'',off:0,pref:{s:9,e:18},con:null,bank:'',acc:'',leaves:[]}:EMP[i];
+  EDIT_LEAVES=(e.leaves||[]).slice();
+  const dayOpts=DAYS.map((d,di)=>'<option value="'+di+'"'+(e.off===di?' selected':'')+'>'+d+'</option>').join('');
+  const conDay=e.con?e.con.day:'';
+  const conAfter=e.con?e.con.after:'';
+  const m=document.getElementById('empModal');
+  m.innerHTML=
+  '<div class="mhead"><span>'+(isNew?'เพิ่มพนักงาน':'แก้ไข: '+e.name)+'</span><button onclick="closeEmp()">✕</button></div>'+
+  '<div class="mbody">'+
+    '<div class="fld"><label>ชื่อพนักงาน</label><input id="f_name" value="'+e.name+'" placeholder="เช่น สมชาย"></div>'+
+    '<div class="fld"><label>วันหยุดประจำสัปดาห์</label><select id="f_off">'+dayOpts+'</select></div>'+
+    '<div class="fld"><label>ช่วงเวลาประจำ (ที่ไลฟ์เป็นปกติ)</label><div class="row2">'+
+      '<input id="f_ps" type="number" min="0" max="23" value="'+e.pref.s+'" placeholder="เริ่ม">'+
+      '<input id="f_pe" type="number" min="0" max="23" value="'+e.pref.e+'" placeholder="จบ"></div>'+
+      '<div class="hint">ใส่เป็นชั่วโมง 0–23 · ข้ามเที่ยงคืนได้ เช่น 18 → 2</div></div>'+
+    '<div class="fld"><label>ข้อจำกัด (ห้ามเด็ดขาด) — ไม่มีก็เว้นว่าง</label><div class="row3">'+
+      '<div><span class="hint">วัน</span><select id="f_cday"><option value="">— ไม่มี —</option>'+
+        DAYS.map((d,di)=>'<option value="'+di+'"'+(conDay===di?' selected':'')+'>'+d+'</option>').join('')+'</select></div>'+
+      '<div><span class="hint">เข้าหลัง (น.)</span><input id="f_cafter" type="number" min="0" max="23" value="'+conAfter+'" placeholder="18"></div>'+
+      '<div class="hint" style="padding-bottom:9px">เช่น อา. หลัง 18</div></div></div>'+
+    '<div class="fld"><label>ธนาคาร & เลขบัญชี (สำหรับโอนค่าจ้าง)</label><div class="row2">'+
+      '<input id="f_bank" value="'+(e.bank||'')+'" placeholder="ธนาคาร">'+
+      '<input id="f_acc" value="'+(e.acc||'')+'" placeholder="เลขบัญชี"></div></div>'+
+    '<div class="fld"><label>วันลาเพิ่ม (นอกวันหยุดประจำ)</label>'+
+      '<div class="row2"><input id="f_leave" type="date">'+
+      '<button type="button" onclick="addLeave('+i+')" style="border:none;border-radius:10px;background:var(--blue-pale);color:var(--blue);font-family:Prompt;font-weight:600;cursor:pointer">+ เพิ่มวันลา</button></div>'+
+      '<div class="chk" id="leaveChips" style="margin-top:8px"></div></div>'+
+    '<div class="fld"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="f_support" style="width:auto"'+(e.role==='support'?' checked':'')+'> ⭐ เป็นพนักงานซัพพอร์ต (คั่นช่วงพักให้คนหลัก)</label>'+
+      '<div class="hint">ถ้าติ๊ก คนนี้จะถูกล็อกเป็นซัพพอร์ตในวันที่เข้าทีม (ตารางจะเป็นชั่วโมงคั่น ๆ)</div></div>'+
+  '</div>'+
+  '<div class="mfoot">'+
+    (isNew?'':'<button class="del" onclick="askDel('+i+')" id="delBtn">ลบ</button>')+
+    '<button class="save" onclick="saveEmp('+i+')">บันทึก</button></div>';
+  document.getElementById('empMask').classList.add('show');
+  renderLeaveChips();
+}
+let EDIT_LEAVES=[];
+function renderLeaveChips(){
+  const c=document.getElementById('leaveChips'); if(!c)return;
+  c.innerHTML=EDIT_LEAVES.length?EDIT_LEAVES.map((d,idx)=>
+    '<label style="background:#FBEAEA;color:#D64550">'+d+' <span style="cursor:pointer;font-weight:700" onclick="rmLeave('+idx+')">✕</span></label>').join('')
+    :'<span class="hint">ยังไม่มีวันลาเพิ่ม</span>';
+}
+function addLeave(i){
+  const v=document.getElementById('f_leave').value; if(!v)return;
+  const [y,mo,dd]=v.split('-'); const s=(+dd)+'/'+(+mo)+'/'+y; // เป็นรูปแบบ d/m/yyyy
+  if(!EDIT_LEAVES.includes(s))EDIT_LEAVES.push(s);
+  document.getElementById('f_leave').value=''; renderLeaveChips();
+}
+function rmLeave(idx){EDIT_LEAVES.splice(idx,1);renderLeaveChips();}
+function askDel(i){
+  const b=document.getElementById('delBtn');
+  b.textContent='ยืนยันลบ?'; b.style.background='#D64550'; b.style.color='#fff';
+  b.setAttribute('onclick','delEmp('+i+')');
+}
+function closeEmp(){document.getElementById('empMask').classList.remove('show');}
+document.getElementById('empMask').addEventListener('click',e=>{if(e.target.id==='empMask')closeEmp();});
+function saveEmp(i){
+  const g=id=>document.getElementById(id).value.trim();
+  const name=g('f_name'); if(!name){const n=document.getElementById('f_name');n.style.borderColor='#D64550';n.placeholder='ใส่ชื่อก่อนนะ';n.focus();return;}
+  const cday=g('f_cday'), cafter=g('f_cafter');
+  const obj={
+    name, off:+g('f_off'),
+    pref:{s:+g('f_ps')||0, e:+g('f_pe')||0},
+    con:(cday!==''&&cafter!=='')?{day:+cday,after:+cafter}:null,
+    bank:g('f_bank'), acc:g('f_acc'), leaves:EDIT_LEAVES.slice(),
+    role:document.getElementById('f_support').checked?'support':null,
+    color:(i===-1)?pickColor():EMP[i].color
+  };
+  if(i===-1)EMP.push(obj); else EMP[i]=obj;
+  closeEmp(); runAndRender();
+}
+function delEmp(i){
+  EMP.splice(i,1); closeEmp(); runAndRender();
+}
+// ---------- ตั้งเวลาเปิด-ปิดเฉพาะวัน ----------
+function openDay(di){
+  const d=LAST.dates[di]; const k=fmtD(d);
+  const hrs=storeHours(d); const curOpen=hrs[0], curClose=(hrs[hrs.length-1]+1)%24;
+  const camp=isCampaign(d);
+  const defTxt = camp?('วันแคมเปญ ('+camp+') — เปิด 24 ชม.'):'วันปกติ — 07:00–01:00';
+  const m=document.getElementById('dayModal');
+  m.innerHTML=
+  '<div class="mhead"><span>เวลาเปิด-ปิด · '+DAYS[(d.getDay()+6)%7]+' '+k+'</span><button onclick="closeDay()">✕</button></div>'+
+  '<div class="mbody">'+
+    '<div class="hint" style="margin-bottom:12px">ค่าเริ่มต้น: '+defTxt+'</div>'+
+    '<div class="fld"><label>เวลาเปิด-ปิดเฉพาะวันนี้ (ทับค่าเริ่มต้น)</label><div class="row2">'+
+      '<div><span class="hint">เปิด (น.)</span><input id="d_open" type="number" min="0" max="23" value="'+curOpen+'"></div>'+
+      '<div><span class="hint">ปิด (น.)</span><input id="d_close" type="number" min="0" max="23" value="'+curClose+'"></div></div>'+
+      '<div class="hint">ปิดข้ามเที่ยงคืนได้ เช่น เปิด 7 ปิด 3 = 07:00 ถึงตี 3 · เปิด 0 ปิด 0 = 24 ชม.</div></div>'+
+  '</div>'+
+  '<div class="mfoot">'+
+    ((k in HOURS_OVERRIDE)?'<button class="del" onclick="resetDay('+di+')">↺ คืนค่าเริ่มต้น</button>':'')+
+    '<button class="save" onclick="saveDay('+di+')">บันทึก</button></div>';
+  document.getElementById('dayMask').classList.add('show');
+}
+function closeDay(){document.getElementById('dayMask').classList.remove('show');}
+document.getElementById('dayMask').addEventListener('click',e=>{if(e.target.id==='dayMask')closeDay();});
+function saveDay(di){
+  const d=LAST.dates[di];
+  const o=+document.getElementById('d_open').value, c=+document.getElementById('d_close').value;
+  HOURS_OVERRIDE[fmtD(d)]={open:o,close:c};
+  closeDay(); runAndRender();
+}
+function resetDay(di){
+  delete HOURS_OVERRIDE[fmtD(LAST.dates[di])];
+  closeDay(); runAndRender();
+}
+// ---------- เข้างานจริง ----------
+let VIEW='plan';            // 'plan' | 'real'
+let REAL={};               // key "store|d/m/yyyy|hour" -> [empIdx] | [a,b] | 'gap'
+function resolveReal(di,h,store){ // ค่าจริงของช่อง (ถ้าไม่เคยแก้ = ก๊อปจากแผน)
+  store = store||CUR_STORE;
+  const g=(LAST.all[store]||[])[di]; if(!g) return 'gap';
+  const k=skey(store,g.date,h);
+  if(k in REAL) return REAL[k];
+  const idx=g.hours.indexOf(h); const v=g.row[idx];
+  return (typeof v==='number')?[v]:'gap';
+}
+function setView(v){
+  VIEW=v;
+  document.getElementById('vtPlan').className='vtab'+(v==='plan'?' active':'');
+  document.getElementById('vtReal').className='vtab real'+(v==='real'?' active':'');
+  clearCopy();
+  renderTable(); renderWage();
+}
+function switchStore(v){ CUR_STORE=v; clearCopy(); runAndRender(); }
+function renderStores(){
+  const sel=document.getElementById('storePick');
+  sel.innerHTML=STORES.map(s=>'<option'+(s===CUR_STORE?' selected':'')+'>'+s+'</option>').join('');
+}
+let LAST=null;
+function runAndRender(){
+  LAST=buildSchedule();
+  finalize();
+  renderStores();
+  renderWeekBar();
+  renderTable();
+  renderEmp();
+  renderWage();
+}
+function renderWeekBar(){
+  const end=new Date(weekStart);end.setDate(end.getDate()+6);
+  document.getElementById('wkRange').childNodes[0].nodeValue=fmtD(weekStart)+' – '+fmtD(end);
+  document.getElementById('wkNote').textContent='จันทร์ ถึง อาทิตย์';
+  // แคมเปญในสัปดาห์นี้
+  let camps=[];
+  LAST.dates.forEach(d=>{const c=isCampaign(d);if(c)camps.push('วัน'+DAYS[(d.getDay()+6)%7]+' = '+c+' (ไลฟ์ 24 ชม.)');});
+  const b=document.getElementById('wkBadge');
+  if(camps.length){b.style.display='';b.innerHTML='🎯 '+camps.join(' &nbsp;·&nbsp; ');}else b.style.display='none';
+}
+function renderTable(){
+  const {grid}=LAST;
+  const order=DAY_ORDER; // 07:00 -> 06:00
+  let html='<thead><tr><th>เวลา</th>';
+  LAST.dates.forEach((d,di)=>{const wd=DAYS[(d.getDay()+6)%7];
+    const camp=isCampaign(d); const ov=(fmtD(d) in HOURS_OVERRIDE);
+    const tag=ov?'✏️':(camp?'🎯':'');
+    html+='<th style="cursor:pointer" onclick="openDay('+di+')" title="คลิกตั้งเวลาเปิด-ปิดวันนี้">'+wd+' '+tag+
+      '<span class="d">'+fmtD(d)+'</span>'+
+      '<span class="d" style="opacity:.75">'+storeLabel(d)+'</span></th>';});
+  html+='</tr></thead><tbody>';
+  order.forEach(h=>{
+    const next=(h+1)%24;
+    const lbl=String(h).padStart(2,'0')+':00–'+String(next).padStart(2,'0')+':00';
+    const isNight=(h>=0&&h<6);
+    html+='<tr><td class="timecell'+(isNight?' night':'')+'">'+lbl+'</td>';
+    LAST.dates.forEach((d,di)=>{
+      const g=grid[di]; const idx=g.hours.indexOf(h);
+      if(idx===-1){ html+='<td><span class="cell closed">พักไลฟ์</span></td>'; return; }
+      if(VIEW==='real'){ html+=realCell(di,h,isNight); return; }
+      const v=g.row[idx];
+      const k=dateKey(d,h); const isManual=(k in OVERRIDES);
+      const bad=validateCell(di,h).some(x=>x.lv==='err');
+      const selc=(COPY_MODE&&inSel(di,h))?' sel':'';
+      const cls='cell editable'+(isManual?' manual':'')+(bad?' badcell':'')+selc;
+      if(v==='gap'){ html+='<td><span class="'+cls+' gap" onclick="openPicker('+di+','+h+',event)">ว่าง</span></td>'; return; }
+      const e=EMP[v];
+      const marks=(e.role==='support'?' <span class="p">⭐</span>':'')+(isNight?' <span class="p">🌙</span>':'');
+      html+='<td><span class="'+cls+'" style="background:'+e.color+'" '+
+        'onclick="openPicker('+di+','+h+',event)">'+e.name+marks+'</span></td>';
+    });
+    html+='</tr>';
+  });
+  html+='</tbody>';
+  document.getElementById('schedTbl').innerHTML=html;
+}
+function realCell(di,h,isNight){
+  const d=LAST.dates[di]; const k=dateKey(d,h); const r=resolveReal(di,h);
+  const edited=(k in REAL);
+  const selc=(COPY_MODE&&inSel(di,h))?' sel':'';
+  const mark=(edited?' manual':'')+selc;
+  const clk='onclick="onRealCell('+di+','+h+',event)"';
+  if(r==='gap') return '<td class="realedit"><span class="cell editable gap'+mark+'" '+clk+'>ว่าง</span></td>';
+  if(r.length===1){
+    const e=EMP[r[0]];
+    const marks=(isNight?' <span class="p">🌙</span>':'');
+    return '<td class="realedit"><span class="cell editable'+mark+'" style="background:'+e.color+'" '+clk+'>'+
+      e.name+marks+'</span></td>';
+  }
+  const a=EMP[r[0]], b=EMP[r[1]];
+  return '<td class="realedit"><span class="cell editable two'+mark+'" style="background:linear-gradient(180deg,'+a.color+' 50%,'+b.color+' 50%)" '+clk+'>'+
+    '<span>'+a.name+' <b class="half">½</b></span><span>'+b.name+' <b class="half">½</b></span></span></td>';
+}
+function onRealCell(di,h,ev){ ev.stopPropagation();
+  if(COPY_MODE){ copyClick(di,h); return; }
+  openReal(di,h);
+}
+function openReal(di,h){
+  const d=LAST.dates[di]; const r=resolveReal(di,h);
+  const cur = (r==='gap')?[-1,-1]:[r[0], (r.length>1?r[1]:-1)];
+  const next=(h+1)%24; const lbl=String(h).padStart(2,'0')+':00–'+String(next).padStart(2,'0')+':00';
+  const opts=v=>'<option value="-1"'+(v===-1?' selected':'')+'>— ว่าง —</option>'+
+    EMP.map((e,ei)=>'<option value="'+ei+'"'+(v===ei?' selected':'')+'>'+e.name+'</option>').join('');
+  const m=document.getElementById('dayModal');
+  m.innerHTML=
+  '<div class="mhead" style="background:linear-gradient(135deg,var(--ok),#5FC896)"><span>เข้างานจริง · '+DAYS[(d.getDay()+6)%7]+' '+lbl+'</span><button onclick="closeDay()">✕</button></div>'+
+  '<div class="mbody">'+
+    '<div class="fld"><label>คนที่เข้าไลฟ์จริง</label><select id="r_a">'+opts(cur[0])+'</select></div>'+
+    '<div class="fld"><label>คนที่ 2 (กรณีมาสายลงชื่อคู่ — จ่ายคนละครึ่ง ชม.)</label><select id="r_b">'+opts(cur[1])+'</select></div>'+
+    '<div class="hint">ถ้าเลือก 2 คน ระบบจ่ายคนละ 0.5 ชม.'+(h>=0&&h<6?' (กะดึก = คนละ 30฿)':' (= คนละ 25฿)')+'</div>'+
+  '</div>'+
+  '<div class="mfoot">'+
+    '<button class="del" onclick="clearReal('+di+','+h+')">↺ ใช้ตามแผน</button>'+
+    '<button class="save" style="background:linear-gradient(135deg,var(--ok),#5FC896);box-shadow:0 3px 0 #2E7D57" onclick="saveReal('+di+','+h+')">บันทึก</button></div>';
+  document.getElementById('dayMask').classList.add('show');
+}
+function saveReal(di,h){
+  const a=+document.getElementById('r_a').value, b=+document.getElementById('r_b').value;
+  const arr=[]; if(a>=0)arr.push(a); if(b>=0&&b!==a)arr.push(b);
+  REAL[dateKey(LAST.dates[di],h)] = arr.length?arr:'gap';
+  closeDay(); renderTable(); renderWage();
+}
+function clearReal(di,h){
+  delete REAL[dateKey(LAST.dates[di],h)];
+  closeDay(); renderTable(); renderWage();
+}
+function renderEmp(){
+  let h='';
+  EMP.forEach((e,i)=>{
+    const wk=LAST.st[i];
+    const pf=e.pref?String(e.pref.s).padStart(2,'0')+':00–'+String(e.pref.e).padStart(2,'0')+':00':'–';
+    // วันที่คนนี้เข้าทำงานแต่ได้ < 6 ชม.
+    let lowDays=[];
+    Object.values(LAST.grid).forEach(g=>{const dh=g.dayHrs[i];
+      if(dh>0&&dh<MIN_DAY) lowDays.push(DAYS[(g.date.getDay()+6)%7]+'('+dh+')');});
+    const warn = lowDays.length?'<br><span style="color:var(--warn);font-size:11px">⚠ ต่ำกว่า 6 ชม.: '+lowDays.join(' ')+'</span>':'';
+    const conTxt = e.con?' · <span style="color:var(--pink)">ห้าม: '+DAYS[e.con.day]+'ก่อน '+e.con.after+':00</span>':'';
+    const leaveTxt=(e.leaves&&e.leaves.length)?'<br><span style="color:#D64550;font-size:11px">🌴 ลา: '+e.leaves.join(', ')+'</span>':'';
+    const bankTxt = (e.bank||e.acc)?'<br><span style="color:var(--text3);font-size:11px">🏦 '+(e.bank||'')+' '+(e.acc||'')+'</span>':'';
+    const roleTxt=(e.role==='support')?' <span class="pill" style="background:#FFF0D9;color:#C47B2E">⭐ ซัพพอร์ต</span>':'';
+    h+='<div class="emp" style="cursor:pointer" onclick="openEmp('+i+')"><span class="dot" style="background:'+e.color+'"></span>'+
+       '<div style="flex:1"><span class="nm">'+e.name+'</span>'+
+       ' <span class="pill" style="background:'+e.color+'18;color:'+e.color+'">🕐 '+pf+'</span>'+roleTxt+
+       '<br><span style="color:var(--text3);font-size:11px">หยุด '+DAYS[e.off]+conTxt+'</span>'+leaveTxt+bankTxt+warn+'</div>'+
+       '<span class="meta">'+wk.wk+' ชม.<br><span style="color:var(--text3)">ดึก '+wk.night+'</span></span></div>';
+  });
+  document.getElementById('empList').innerHTML=h;
+}
+function renderWage(){
+  const pay=EMP.map(()=>({d:0,n:0}));
+  // คิดจาก "เข้างานจริง" ทุกร้านรวมกัน (จ่ายตามจริง) · 2 คน/ชม. = คนละครึ่ง
+  STORES.forEach(store=>{
+    LAST.dates.forEach((d,di)=>{
+      const g=(LAST.all[store]||[])[di]; if(!g)return;
+      g.hours.forEach(h=>{
+        const r=resolveReal(di,h,store); if(r==='gap')return;
+        const share=1/r.length; const night=(h>=0&&h<6);
+        r.forEach(ei=>{ if(night)pay[ei].n+=share; else pay[ei].d+=share; });
+      });
+    });
+  });
+  const f=n=>Number.isInteger(n)?n:n.toFixed(1);
+  let html='<thead><tr><th>พนักงาน</th><th>ปกติ</th><th>ดึก 🌙</th><th>รวม ชม.</th><th>ค่าจ้าง</th></tr></thead><tbody>';
+  let tH=0,tB=0;
+  EMP.forEach((e,i)=>{
+    const p=pay[i]; const baht=Math.round(p.d*RATE_DAY+p.n*RATE_NIGHT); const hrs=p.d+p.n;
+    if(hrs===0) return;
+    tH+=hrs; tB+=baht;
+    const acc=(e.bank||e.acc)?'<br><span style="font-size:10px;color:var(--text3);font-family:Sarabun">'+(e.bank||'')+' '+(e.acc||'')+'</span>':'';
+    html+='<tr><td><span class="pill" style="background:'+e.color+'22;color:'+e.color+'">'+e.name+'</span>'+acc+'</td>'+
+      '<td>'+f(p.d)+'</td><td>'+f(p.n)+'</td><td>'+f(hrs)+'</td><td class="total">฿'+baht.toLocaleString()+'</td></tr>';
+  });
+  html+='</tbody><tfoot><tr><td>รวมทั้งทีม</td><td colspan="2"></td><td>'+f(tH)+'</td><td>฿'+tB.toLocaleString()+'</td></tr></tfoot>';
+  document.getElementById('wageTbl').innerHTML=html;
+}
+
+// ================= เชื่อม Google Sheet (Apps Script) =================
+const API = {
+  url:'https://script.google.com/macros/s/AKfycbzbinyuEeHYCC2yBVaS4St509N7MBfI0o9kYjoDljBMHEwRLExdEk8YcFcZnYN0Kalm/exec',
+  token:'jodji-729'
+};
+function setSync(txt,color){document.getElementById('syncStatus').textContent=txt;
+  document.getElementById('syncDot').style.background=color||'#C9B8DC';}
+function isoOf(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function dOfISO(s){const p=String(s).slice(0,10).split('-').map(Number);return new Date(p[0],p[1]-1,p[2]);}
+async function apiGet(params){params.token=API.token;
+  const q=new URLSearchParams(params); const r=await fetch(API.url+'?'+q.toString()); return parseRes(r);}
+async function apiPost(body){body.token=API.token;
+  const r=await fetch(API.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});return parseRes(r);}
+async function parseRes(r){
+  const t=await r.text();
+  try{ return JSON.parse(t); }
+  catch(_){
+    // ได้ HTML กลับมา = ปัญหา deploy/สิทธิ์
+    throw new Error('Apps Script ตอบเป็นหน้าเว็บ ไม่ใช่ข้อมูล — เช็ก Deploy ให้ "Who has access = Anyone" แล้ว Redeploy เป็น New version (URL เดิม)');
+  }
+}
+
+function empIdxByName(name){let i=EMP.findIndex(e=>e.name===name);
+  if(i<0){EMP.push({name,color:'#CFC6DA',off:-1,pref:{s:0,e:0},con:null,bank:'',acc:'',sen:99,role:null,status:'ลาออก',leaves:[]});i=EMP.length-1;}
+  return i;}
+function rowToEmp(o){
+  const con=(o['ข้อจำกัดวัน']!==''&&o['ข้อจำกัดวัน']!=null)?{day:DAYS.indexOf(o['ข้อจำกัดวัน']),after:+o['เข้าหลัง']||0}:null;
+  const sup=String(o['ซัพพอร์ต']||'').toUpperCase();
+  return {name:o['ชื่อ'],color:o['สี']||pickColor(),off:DAYS.indexOf(o['วันหยุด']),
+    pref:{s:+o['ช่วงเริ่ม']||0,e:+o['ช่วงจบ']||0},con,
+    bank:o['ธนาคาร']||'',acc:String(o['เลขบัญชี']||''),sen:+o['อาวุโส']||99,
+    role:(sup==='TRUE'||sup==='ใช่'||sup==='1')?'support':null,
+    status:o['สถานะ']||'ทำงาน',leaves:[]};
+}
+function empToRow(e){return {'ชื่อ':e.name,'สี':e.color,'วันหยุด':(e.off>=0?DAYS[e.off]:''),
+  'ช่วงเริ่ม':e.pref.s,'ช่วงจบ':e.pref.e,'ข้อจำกัดวัน':e.con?DAYS[e.con.day]:'','เข้าหลัง':e.con?e.con.after:'',
+  'ธนาคาร':e.bank||'','เลขบัญชี':e.acc||'','อาวุโส':e.sen||'','ซัพพอร์ต':e.role==='support'?'TRUE':'','สถานะ':e.status||'ทำงาน'};}
+
+function applyUrl(){
+  const u=document.getElementById('urlInput').value.trim();
+  const t=document.getElementById('tokenInput').value.trim();
+  if(u) API.url=u; if(t) API.token=t;
+  loadFromSheet();
+}
+async function loadFromSheet(){
+  setSync('กำลังโหลด...','#E8B14C');
+  try{
+    const from=isoOf(new Date(Date.now()-183*864e5)), to=isoOf(new Date(Date.now()+31*864e5));
+    const res=await apiGet({action:'load',from,to});
+    if(!res.ok) throw new Error(res.error||'load failed');
+    const d=res.data;
+    if(d.stores && d.stores.length){ STORES = d.stores.map(r=>r['ชื่อร้าน']).filter(Boolean);
+      if(STORES.indexOf(CUR_STORE)<0) CUR_STORE=STORES[0]; }
+    if(d.employees && d.employees.length){ EMP = d.employees.map(rowToEmp); }
+    (d.leaves||[]).forEach(l=>{const i=EMP.findIndex(e=>e.name===l['ชื่อ']);
+      if(i>=0){EMP[i].leaves.push(fmtD(dOfISO(l['วันที่'])));}});
+    OVERRIDES={};
+    (d.plan||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE; const key=skey(store,dOfISO(r['วันที่']),+r['ชั่วโมง']);
+      const nm=r['พนักงาน']; OVERRIDES[key]=(!nm||nm==='ว่าง')?'gap':empIdxByName(nm);});
+    REAL={};
+    (d.real||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE; const key=skey(store,dOfISO(r['วันที่']),+r['ชั่วโมง']);
+      const a=r['พนักงาน1'],b=r['พนักงาน2'];const arr=[];
+      if(a&&a!=='ว่าง')arr.push(empIdxByName(a)); if(b&&b!=='ว่าง')arr.push(empIdxByName(b));
+      REAL[key]=arr.length?arr:'gap';});
+    HOURS_OVERRIDE={};
+    (d.storeHours||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE;
+      HOURS_OVERRIDE[store+'|'+fmtD(dOfISO(r['วันที่']))]={open:+r['เปิด'],close:+r['ปิด']};});
+    runAndRender();
+    setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
+  }catch(err){ setSync('ผิดพลาด: '+err.message+' (ถ้าขึ้น fetch ให้เช็คว่า Deploy = Anyone)','#D64550'); }
+}
+
+async function saveEmployeesToSheet(){
+  setSync('กำลังบันทึกพนักงาน...','#E8B14C');
+  try{
+    let res=await apiPost({action:'saveEmployees',rows:EMP.map(empToRow)});
+    if(!res.ok) throw new Error(res.error);
+    const leaves=[]; EMP.forEach(e=>(e.leaves||[]).forEach(l=>{const p=l.split('/');
+      leaves.push({'ชื่อ':e.name,'วันที่':p[2]+'-'+String(+p[1]).padStart(2,'0')+'-'+String(+p[0]).padStart(2,'0')});}));
+    res=await apiPost({action:'saveLeaves',rows:leaves});
+    if(!res.ok) throw new Error(res.error);
+    // บันทึกรายชื่อร้าน (ไลฟ์_ร้าน)
+    const storeRows=STORES.map(s=>({'ชื่อร้าน':s,'เวลาเปิดปกติ':7,'เวลาปิดปกติ':1,'สถานะ':'เปิด'}));
+    res=await apiPost({action:'saveStores',rows:storeRows});
+    if(!res.ok) throw new Error(res.error);
+    setSync('บันทึกพนักงาน+ร้านแล้ว ✓','#4CAF82');
+  }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
+}
+
+async function saveWeekToSheet(){
+  setSync('กำลังบันทึกสัปดาห์...','#E8B14C');
+  try{
+    const from=isoOf(weekStart), end=new Date(weekStart); end.setDate(end.getDate()+6); const to=isoOf(end);
+    // แผน + จริง ทุกร้าน
+    const plan=[], real=[], shr=[];
+    STORES.forEach(store=>{
+      LAST.dates.forEach((d,di)=>{const g=(LAST.all[store]||[])[di]; if(!g)return;
+        g.hours.forEach((h,idx)=>{const v=g.row[idx];
+          plan.push({'วันที่':isoOf(d),'ชั่วโมง':h,'ร้าน':store,'พนักงาน':(typeof v==='number'?EMP[v].name:'ว่าง')});
+          OVERRIDES[skey(store,d,h)]=(typeof v==='number'?v:'gap');
+          const r=resolveReal(di,h,store);
+          real.push({'วันที่':isoOf(d),'ชั่วโมง':h,'ร้าน':store,
+            'พนักงาน1':(r==='gap'?'':EMP[r[0]].name),'พนักงาน2':(r!=='gap'&&r[1]!=null?EMP[r[1]].name:'')});});
+        const k=store+'|'+fmtD(d);
+        if(k in HOURS_OVERRIDE)shr.push({'วันที่':isoOf(d),'ร้าน':store,'เปิด':HOURS_OVERRIDE[k].open,'ปิด':HOURS_OVERRIDE[k].close});
+      });
+    });
+    let res=await apiPost({action:'savePlan',from,to,rows:plan});      // ไม่ส่ง store -> ลบทั้งช่วงแล้วเขียนใหม่ทุกร้าน
+    if(!res.ok) throw new Error(res.error);
+    res=await apiPost({action:'saveReal',from,to,rows:real});
+    if(!res.ok) throw new Error(res.error);
+    res=await apiPost({action:'saveStoreHours',from,to,rows:shr});
+    if(!res.ok) throw new Error(res.error);
+    setSync('บันทึกสัปดาห์ '+from+' (ทุกร้าน) แล้ว ✓','#4CAF82');
+  }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
+}
+
+runAndRender();
+try{document.getElementById('urlInput').value=API.url;document.getElementById('tokenInput').value=API.token;}catch(_){}
+loadFromSheet();
+</script>
+</body>
+</html>
