@@ -1364,7 +1364,10 @@ function buildChannelSelectorUI() {
     const o = document.createElement("option"); o.value = "all"; o.textContent = "🔀 รวมทุกช่อง"; sel.appendChild(o);
   }
   chans.forEach(ch => {
-    const o = document.createElement("option"); o.value = ch.sheetId; o.textContent = "📺 " + (ch.channelName||"ช่อง"); sel.appendChild(o);
+    // Use "sheetId:sheetName" as unique key so two channels sharing the same Sheet
+    // but different tabs are treated as distinct options
+    const key = ch.sheetName ? `${ch.sheetId}:${ch.sheetName}` : ch.sheetId;
+    const o = document.createElement("option"); o.value = key; o.textContent = "📺 " + (ch.channelName||"ช่อง"); sel.appendChild(o);
   });
   if (!chans.length) {
     const o = document.createElement("option"); o.value = "all"; o.textContent = "📺 729flux (demo)"; sel.appendChild(o);
@@ -1382,7 +1385,11 @@ function switchChannel() {
 function getActiveChannelData() {
   if (!RAW) return null;
   if (activeChannelKey === "all") return RAW.combined || (RAW.channels||[])[0];
-  return (RAW.channels||[]).find(c => c.sheetId === activeChannelKey) || RAW.combined;
+  // Match by "sheetId:sheetName" key or fall back to sheetId-only for backward compat
+  return (RAW.channels||[]).find(c => {
+    const key = c.sheetName ? `${c.sheetId}:${c.sheetName}` : c.sheetId;
+    return key === activeChannelKey;
+  }) || RAW.combined;
 }
 
 /* ==================== MAP API DATA -> DATA (same shape as before) ==================== */
