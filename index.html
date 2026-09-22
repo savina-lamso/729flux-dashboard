@@ -1320,7 +1320,12 @@ async function loadAllData() {
     if (json.error) throw new Error(json.error);
     RAW = json;
     (RAW.channels||[]).forEach(ch => {
-      const cfg = channelsCfg.find(c => c.sheetId === ch.sheetId);
+      // Match by sheetId+sheetName pair — needed when two channels share the same Sheet
+      // but use different tabs (e.g. 729flux tab vs MAHA tab in one Google Sheet)
+      const cfg = channelsCfg.find(c =>
+        c.sheetId === ch.sheetId &&
+        (!c.sheetName || !ch.sheetName || c.sheetName === ch.sheetName)
+      );
       if (cfg) ch.channelName = cfg.name;
     });
     if (RAW.combined) RAW.combined.channelName = "รวมทุกช่อง";
