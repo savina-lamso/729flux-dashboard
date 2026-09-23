@@ -998,8 +998,8 @@ async function loadFromSheet(retries){
     (d.storeHours||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE;
       HOURS_OVERRIDE[store+'|'+fmtD(dOfISO(r['วันที่']))]={open:+r['เปิด'],close:+r['ปิด']};});
     BONUS={};
-    (d.bonus||[]).forEach(r=>{const wk=String(r['สัปดาห์']).slice(0,10); if(!BONUS[wk])BONUS[wk]={};
-      BONUS[wk][r['ชื่อ']]=parseFloat(r['ยอด'])||0;});
+    (d.payroll||[]).forEach(r=>{const wk=String(r['สัปดาห์']).slice(0,10); if(!BONUS[wk])BONUS[wk]={};
+      const bo=parseFloat(r['โบนัส'])||0; if(bo>0)BONUS[wk][r['ชื่อ']]=bo;});
     runAndRender();
     clearDirty(); setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
   }catch(err){
@@ -1052,10 +1052,18 @@ async function saveWeekToSheet(){
     setSync('กำลังบันทึกเวลาร้าน (3/3)...','#E8B14C');
     res=await apiPost({action:'saveStoreHours',from,to,rows:shr});
     if(!res.ok) throw new Error(res.error);
-    // โบนัสของสัปดาห์นี้
+    // ยอดทำจ่ายของสัปดาห์นี้ (รวมทุกร้านต่อคน + โบนัส)
     const wk=weekKeyOf(); const bwk=BONUS[wk]||{};
-    const bonusRows=Object.keys(bwk).filter(n=>bwk[n]>0).map(n=>({'สัปดาห์':wk,'ชื่อ':n,'ยอด':bwk[n],'หมายเหตุ':''}));
-    res=await apiPost({action:'saveBonus',week:wk,rows:bonusRows});
+    const pay=EMP.map(()=>({d:0,n:0}));
+    STORES.forEach(store=>{ LAST.dates.forEach((dd,di)=>{const g=(LAST.all[store]||[])[di]; if(!g)return;
+      g.hours.forEach(h=>{const r=resolveReal(di,h,store); if(r==='gap')return;
+        const share=1/r.length; const night=(h>=0&&h<6);
+        r.forEach(ei=>{ if(night)pay[ei].n+=share; else pay[ei].d+=share; });});});});
+    const payRows=[];
+    EMP.forEach((e,i)=>{const p=pay[i]; const baht=Math.round(p.d*RATE_DAY+p.n*RATE_NIGHT); const hrs=p.d+p.n;
+      const bo=bwk[e.name]||0; if(hrs===0 && !bo) return;
+      payRows.push({'สัปดาห์':wk,'ชื่อ':e.name,'ชม.ปกติ':p.d,'ชม.ดึก':p.n,'ค่าจ้าง':baht,'โบนัส':bo,'รวมจ่าย':baht+bo,'ธนาคาร':e.bank||'','เลขบัญชี':e.acc||''});});
+    res=await apiPost({action:'savePayroll',week:wk,rows:payRows});
     if(!res.ok) throw new Error(res.error);
     clearDirty(); setSync('บันทึกสัปดาห์ '+from+' (ทุกร้าน) แล้ว ✓','#4CAF82');
   }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
