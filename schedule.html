@@ -165,6 +165,7 @@ table.sched{border-collapse:collapse;width:100%;min-width:920px;font-size:13px}
 td.realedit .cell{cursor:pointer}
 .cell.sel{outline:3px solid var(--accent);outline-offset:-3px;box-shadow:inset 0 0 0 100px rgba(240,184,96,.25)}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -230,10 +231,12 @@ td.realedit .cell{cursor:pointer}
     <button onclick="clearCopy()" style="margin-left:6px;border:none;background:#F3E3CC;color:#8A5A1E;font-family:Prompt;padding:5px 10px;border-radius:9px;cursor:pointer">ล้าง</button>
   </div>
 
-  <div class="tablecard">
+  <div class="tablecard" id="tableCard">
     <div class="scroll"><table class="sched" id="schedTbl"></table></div>
   </div>
-
+  <div style="margin:-6px 0 16px;text-align:right">
+    <button onclick="exportImg('tableCard','ตารางไลฟ์')" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:var(--blue);border:none;cursor:pointer;background:var(--blue-pale);padding:8px 14px;border-radius:10px;box-shadow:0 2px 0 var(--blue-mid)">📷 บันทึกรูปตาราง</button>
+  </div>
   <div class="grid2">
     <div class="panel">
       <h3 style="justify-content:space-between"><span>👥 พนักงาน & วันหยุด</span>
@@ -244,12 +247,13 @@ td.realedit .cell{cursor:pointer}
         กรอก: ชื่อ · วันหยุด · ช่วงเวลาประจำ · ข้อจำกัด · ธนาคาร (สีระบบเลือกให้)
       </div>
     </div>
-    <div class="panel">
-      <h3>💰 สรุปค่าจ้างรายสัปดาห์ <span style="font-size:12px;color:var(--text2);font-family:Sarabun;font-weight:400">(โอนทุกวันจันทร์)</span></h3>
+    <div class="panel" id="wagePanel">
+      <h3 style="justify-content:space-between"><span>💰 สรุปค่าจ้างรายสัปดาห์ <span style="font-size:12px;color:var(--text2);font-family:Sarabun;font-weight:400">(โอนทุกวันจันทร์)</span></span>
+        <button onclick="exportImg('wagePanel','สรุปค่าจ้าง')" style="font-family:Prompt;font-size:11px;font-weight:600;color:var(--blue);border:none;cursor:pointer;background:var(--blue-pale);padding:6px 10px;border-radius:9px">📷 รูป</button></h3>
       <table class="wagetbl" id="wageTbl"></table>
       <div class="note">
         ค่าจ้าง <b>50฿/ชม.</b> · กะดึก 00:00–06:00 <b>60฿/ชม.</b> 🌙<br>
-        คิดจาก <b>"เข้างานจริง"</b> · มาสายลงชื่อคู่ = คนละครึ่ง ชม. · แสดงเลขบัญชีไว้โอน
+        คิดจาก <b>"เข้างานจริง"</b> · มาสายลงชื่อคู่ = คนละครึ่ง ชม. · ช่องโบนัสกรอกเพิ่มได้ต่อสัปดาห์
       </div>
     </div>
   </div>
@@ -713,6 +717,22 @@ function resetDay(di){
 // ---------- เข้างานจริง ----------
 let VIEW='plan';            // 'plan' | 'real'
 let REAL={};               // key "store|d/m/yyyy|hour" -> [empIdx] | [a,b] | 'gap'
+let BONUS={};              // BONUS[weekKey][ชื่อ] = ยอด (บาท)
+function weekKeyOf(){return isoOf(weekStart);}
+function setBonus(name,val){const wk=weekKeyOf(); if(!BONUS[wk])BONUS[wk]={};
+  const n=parseFloat(val)||0; if(n>0)BONUS[wk][name]=n; else delete BONUS[wk][name];
+  markDirty(); renderWage();}
+// เซฟ element เป็นรูป PNG
+function exportImg(elId,label){
+  const el=document.getElementById(elId); if(!el||!window.html2canvas)return;
+  const oldStatus=document.getElementById('syncStatus').textContent; setSync('กำลังสร้างรูป...','#E8B14C');
+  html2canvas(el,{scale:2,backgroundColor:'#ffffff'}).then(canvas=>{
+    const a=document.createElement('a');
+    a.download=label+'_'+CUR_STORE+'_'+weekKeyOf()+'.png';
+    a.href=canvas.toDataURL('image/png'); a.click();
+    setSync(oldStatus.indexOf('เชื่อม')>=0?'เชื่อม Sheet แล้ว ✓':oldStatus, oldStatus.indexOf('เชื่อม')>=0?'#4CAF82':'#C9B8DC');
+  }).catch(err=>setSync('สร้างรูปไม่สำเร็จ: '+err.message,'#D64550'));
+}
 function resolveReal(di,h,store){ // ค่าจริงของช่อง (ถ้าไม่เคยแก้ = ก๊อปจากแผน)
   store = store||CUR_STORE;
   const g=(LAST.all[store]||[])[di]; if(!g) return 'gap';
@@ -883,17 +903,21 @@ function renderWage(){
     });
   });
   const f=n=>Number.isInteger(n)?n:n.toFixed(1);
-  let html='<thead><tr><th>พนักงาน</th><th>ปกติ</th><th>ดึก 🌙</th><th>รวม ชม.</th><th>ค่าจ้าง</th></tr></thead><tbody>';
-  let tH=0,tB=0;
+  const wk=weekKeyOf(); const bwk=BONUS[wk]||{};
+  let html='<thead><tr><th>พนักงาน</th><th>ปกติ</th><th>ดึก 🌙</th><th>รวม ชม.</th><th>ค่าจ้าง</th><th>โบนัส</th><th>รวมจ่าย</th></tr></thead><tbody>';
+  let tH=0,tB=0,tBo=0;
   EMP.forEach((e,i)=>{
     const p=pay[i]; const baht=Math.round(p.d*RATE_DAY+p.n*RATE_NIGHT); const hrs=p.d+p.n;
-    if(hrs===0) return;
-    tH+=hrs; tB+=baht;
+    const bo=bwk[e.name]||0;
+    if(hrs===0 && !bo) return;
+    tH+=hrs; tB+=baht; tBo+=bo;
     const acc=(e.bank||e.acc)?'<br><span style="font-size:10px;color:var(--text3);font-family:Sarabun">'+(e.bank||'')+' '+(e.acc||'')+'</span>':'';
     html+='<tr><td><span class="pill" style="background:'+e.color+'22;color:'+e.color+'">'+e.name+'</span>'+acc+'</td>'+
-      '<td>'+f(p.d)+'</td><td>'+f(p.n)+'</td><td>'+f(hrs)+'</td><td class="total">฿'+baht.toLocaleString()+'</td></tr>';
+      '<td>'+f(p.d)+'</td><td>'+f(p.n)+'</td><td>'+f(hrs)+'</td><td>฿'+baht.toLocaleString()+'</td>'+
+      '<td><input type="number" min="0" value="'+(bo||'')+'" placeholder="0" onchange="setBonus(\''+e.name.replace(/'/g,"")+'\',this.value)" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;font-size:12px;font-family:Sarabun;text-align:right"></td>'+
+      '<td class="total">฿'+(baht+bo).toLocaleString()+'</td></tr>';
   });
-  html+='</tbody><tfoot><tr><td>รวมทั้งทีม</td><td colspan="2"></td><td>'+f(tH)+'</td><td>฿'+tB.toLocaleString()+'</td></tr></tfoot>';
+  html+='</tbody><tfoot><tr><td>รวมทั้งทีม</td><td colspan="2"></td><td>'+f(tH)+'</td><td>฿'+tB.toLocaleString()+'</td><td>฿'+tBo.toLocaleString()+'</td><td>฿'+(tB+tBo).toLocaleString()+'</td></tr></tfoot>';
   document.getElementById('wageTbl').innerHTML=html;
 }
 
@@ -973,6 +997,9 @@ async function loadFromSheet(retries){
     HOURS_OVERRIDE={};
     (d.storeHours||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE;
       HOURS_OVERRIDE[store+'|'+fmtD(dOfISO(r['วันที่']))]={open:+r['เปิด'],close:+r['ปิด']};});
+    BONUS={};
+    (d.bonus||[]).forEach(r=>{const wk=String(r['สัปดาห์']).slice(0,10); if(!BONUS[wk])BONUS[wk]={};
+      BONUS[wk][r['ชื่อ']]=parseFloat(r['ยอด'])||0;});
     runAndRender();
     clearDirty(); setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
   }catch(err){
@@ -1024,6 +1051,11 @@ async function saveWeekToSheet(){
     if(!res.ok) throw new Error(res.error);
     setSync('กำลังบันทึกเวลาร้าน (3/3)...','#E8B14C');
     res=await apiPost({action:'saveStoreHours',from,to,rows:shr});
+    if(!res.ok) throw new Error(res.error);
+    // โบนัสของสัปดาห์นี้
+    const wk=weekKeyOf(); const bwk=BONUS[wk]||{};
+    const bonusRows=Object.keys(bwk).filter(n=>bwk[n]>0).map(n=>({'สัปดาห์':wk,'ชื่อ':n,'ยอด':bwk[n],'หมายเหตุ':''}));
+    res=await apiPost({action:'saveBonus',week:wk,rows:bonusRows});
     if(!res.ok) throw new Error(res.error);
     clearDirty(); setSync('บันทึกสัปดาห์ '+from+' (ทุกร้าน) แล้ว ✓','#4CAF82');
   }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
