@@ -467,7 +467,7 @@ function copyClick(di,h){
       if(VIEW==='real') REAL[key]=CLIP.vals[k];
       else OVERRIDES[key]=CLIP.vals[k];
     }
-    runAndRender();
+    markDirty(); runAndRender();
     setCopyStep('✅ วางแล้ว! เลือกช่วงใหม่ได้เลย');
     SEL=null; CLIP=null; document.getElementById('copyAct').style.display='none';
     return;
@@ -569,6 +569,7 @@ function openPicker(di,h,ev){
 function closePop(){document.getElementById('pop').style.display='none';PICK=null;}
 document.addEventListener('click',e=>{if(!e.target.closest('#pop')&&!e.target.closest('.editable'))closePop();});
 function setCell(ei){
+  markDirty();
   if(!PICK)return; const {di,h}=PICK; const g=LAST.grid[di];
   OVERRIDES[dateKey(g.date,h)] = (ei===-1)?'gap':ei;
   closePop(); runAndRender(); showWarn(di,h);
@@ -618,6 +619,8 @@ function openEmp(i){
     '<div class="fld"><label>ธนาคาร & เลขบัญชี (สำหรับโอนค่าจ้าง)</label><div class="row2">'+
       '<input id="f_bank" value="'+(e.bank||'')+'" placeholder="ธนาคาร">'+
       '<input id="f_acc" value="'+(e.acc||'')+'" placeholder="เลขบัญชี"></div></div>'+
+    '<div class="fld"><label>ลำดับอาวุโส (ยิ่งน้อยยิ่งเก่า — ได้เข้าเวรก่อนเวลาแย่งกัน)</label>'+
+      '<input id="f_sen" type="number" min="1" value="'+(e.sen||EMP.length+1)+'" placeholder="เช่น 1 = เก่าสุด"></div>'+
     '<div class="fld"><label>วันลาเพิ่ม (นอกวันหยุดประจำ)</label>'+
       '<div class="row2"><input id="f_leave" type="date">'+
       '<button type="button" onclick="addLeave('+i+')" style="border:none;border-radius:10px;background:var(--blue-pale);color:var(--blue);font-family:Prompt;font-weight:600;cursor:pointer">+ เพิ่มวันลา</button></div>'+
@@ -662,12 +665,14 @@ function saveEmp(i){
     con:(cday!==''&&cafter!=='')?{day:+cday,after:+cafter}:null,
     bank:g('f_bank'), acc:g('f_acc'), leaves:EDIT_LEAVES.slice(),
     role:document.getElementById('f_support').checked?'support':null,
+    sen:+g('f_sen')||99,
     color:(i===-1)?pickColor():EMP[i].color
   };
   if(i===-1)EMP.push(obj); else EMP[i]=obj;
-  closeEmp(); runAndRender();
+  markDirty(); closeEmp(); runAndRender();
 }
 function delEmp(i){
+  markDirty();
   EMP.splice(i,1); closeEmp(); runAndRender();
 }
 // ---------- ตั้งเวลาเปิด-ปิดเฉพาะวัน ----------
@@ -694,12 +699,14 @@ function openDay(di){
 function closeDay(){document.getElementById('dayMask').classList.remove('show');}
 document.getElementById('dayMask').addEventListener('click',e=>{if(e.target.id==='dayMask')closeDay();});
 function saveDay(di){
+  markDirty();
   const d=LAST.dates[di];
   const o=+document.getElementById('d_open').value, c=+document.getElementById('d_close').value;
   HOURS_OVERRIDE[fmtD(d)]={open:o,close:c};
   closeDay(); runAndRender();
 }
 function resetDay(di){
+  markDirty();
   delete HOURS_OVERRIDE[fmtD(LAST.dates[di])];
   closeDay(); runAndRender();
 }
@@ -728,6 +735,11 @@ function renderStores(){
   const b=document.getElementById('storePick2'); if(b)b.innerHTML=opts;
 }
 let LAST=null;
+// ---------- เตือนก่อนปิดถ้ายังไม่บันทึก ----------
+let DIRTY=false;
+function markDirty(){ DIRTY=true; const b=document.getElementById('syncStatus'); }
+function clearDirty(){ DIRTY=false; }
+window.addEventListener('beforeunload',function(e){ if(DIRTY){ e.preventDefault(); e.returnValue=''; } });
 function runAndRender(){
   LAST=buildSchedule();
   finalize();
@@ -824,12 +836,14 @@ function openReal(di,h){
   document.getElementById('dayMask').classList.add('show');
 }
 function saveReal(di,h){
+  markDirty();
   const a=+document.getElementById('r_a').value, b=+document.getElementById('r_b').value;
   const arr=[]; if(a>=0)arr.push(a); if(b>=0&&b!==a)arr.push(b);
   REAL[dateKey(LAST.dates[di],h)] = arr.length?arr:'gap';
   closeDay(); renderTable(); renderWage();
 }
 function clearReal(di,h){
+  markDirty();
   delete REAL[dateKey(LAST.dates[di],h)];
   closeDay(); renderTable(); renderWage();
 }
@@ -960,7 +974,7 @@ async function loadFromSheet(retries){
     (d.storeHours||[]).forEach(r=>{const store=r['ร้าน']||CUR_STORE;
       HOURS_OVERRIDE[store+'|'+fmtD(dOfISO(r['วันที่']))]={open:+r['เปิด'],close:+r['ปิด']};});
     runAndRender();
-    setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
+    clearDirty(); setSync('เชื่อม Sheet แล้ว ✓','#4CAF82');
   }catch(err){
     if(retries>0){ setSync('กำลังลองใหม่...','#E8B14C'); setTimeout(()=>loadFromSheet(retries-1), 1500); return; }
     setSync('ผิดพลาด: '+err.message,'#D64550');
@@ -980,7 +994,7 @@ async function saveEmployeesToSheet(){
     const storeRows=STORES.map(s=>({'ชื่อร้าน':s,'เวลาเปิดปกติ':7,'เวลาปิดปกติ':1,'สถานะ':'เปิด'}));
     res=await apiPost({action:'saveStores',rows:storeRows});
     if(!res.ok) throw new Error(res.error);
-    setSync('บันทึกพนักงาน+ร้านแล้ว ✓','#4CAF82');
+    clearDirty(); setSync('บันทึกพนักงาน+ร้านแล้ว ✓','#4CAF82');
   }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
 }
 
@@ -1011,7 +1025,7 @@ async function saveWeekToSheet(){
     setSync('กำลังบันทึกเวลาร้าน (3/3)...','#E8B14C');
     res=await apiPost({action:'saveStoreHours',from,to,rows:shr});
     if(!res.ok) throw new Error(res.error);
-    setSync('บันทึกสัปดาห์ '+from+' (ทุกร้าน) แล้ว ✓','#4CAF82');
+    clearDirty(); setSync('บันทึกสัปดาห์ '+from+' (ทุกร้าน) แล้ว ✓','#4CAF82');
   }catch(err){ setSync('ผิดพลาด: '+err.message,'#D64550'); }
 }
 
