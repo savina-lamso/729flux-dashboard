@@ -681,23 +681,25 @@ function delEmp(i){
   EMP.splice(i,1); closeEmp(); runAndRender();
 }
 // ---------- ตั้งเวลาเปิด-ปิดเฉพาะวัน ----------
+function dayKey(d){return CUR_STORE+'|'+fmtD(d);}
 function openDay(di){
-  const d=LAST.dates[di]; const k=fmtD(d);
-  const hrs=storeHours(d); const curOpen=hrs[0], curClose=(hrs[hrs.length-1]+1)%24;
+  const d=LAST.dates[di]; const k=dayKey(d);
+  const hrs=storeHours(d,CUR_STORE); const curOpen=hrs[0], curClose=(hrs[hrs.length-1]+1)%24;
   const camp=isCampaign(d);
   const defTxt = camp?('วันแคมเปญ ('+camp+') — เปิด 24 ชม.'):'วันปกติ — 07:00–01:00';
   const m=document.getElementById('dayModal');
   m.innerHTML=
-  '<div class="mhead"><span>เวลาเปิด-ปิด · '+DAYS[(d.getDay()+6)%7]+' '+k+'</span><button onclick="closeDay()">✕</button></div>'+
+  '<div class="mhead"><span>เวลาเปิด-ปิด · '+CUR_STORE+' · '+DAYS[(d.getDay()+6)%7]+' '+fmtD(d)+'</span><button onclick="closeDay()">✕</button></div>'+
   '<div class="mbody">'+
     '<div class="hint" style="margin-bottom:12px">ค่าเริ่มต้น: '+defTxt+'</div>'+
     '<div class="fld"><label>เวลาเปิด-ปิดเฉพาะวันนี้ (ทับค่าเริ่มต้น)</label><div class="row2">'+
       '<div><span class="hint">เปิด (น.)</span><input id="d_open" type="number" min="0" max="23" value="'+curOpen+'"></div>'+
       '<div><span class="hint">ปิด (น.)</span><input id="d_close" type="number" min="0" max="23" value="'+curClose+'"></div></div>'+
       '<div class="hint">ปิดข้ามเที่ยงคืนได้ เช่น เปิด 7 ปิด 3 = 07:00 ถึงตี 3 · เปิด 0 ปิด 0 = 24 ชม.</div></div>'+
+    '<div class="fld"><button onclick="closeWholeDay('+di+')" style="width:100%;border:none;border-radius:10px;background:#EEE9F5;color:#6B4FA0;font-family:Prompt;font-weight:600;padding:10px;cursor:pointer">🌙 ปิดไลฟ์ทั้งวันนี้ (ไม่ไลฟ์เลย)</button></div>'+
   '</div>'+
   '<div class="mfoot">'+
-    ((k in HOURS_OVERRIDE)?'<button class="del" onclick="resetDay('+di+')">↺ คืนค่าเริ่มต้น</button>':'')+
+    '<button class="del" onclick="resetDay('+di+')">↺ คืนค่าเริ่มต้น</button>'+
     '<button class="save" onclick="saveDay('+di+')">บันทึก</button></div>';
   document.getElementById('dayMask').classList.add('show');
 }
@@ -707,12 +709,22 @@ function saveDay(di){
   markDirty();
   const d=LAST.dates[di];
   const o=+document.getElementById('d_open').value, c=+document.getElementById('d_close').value;
-  HOURS_OVERRIDE[fmtD(d)]={open:o,close:c};
+  HOURS_OVERRIDE[dayKey(d)]={open:o,close:c};
   closeDay(); runAndRender();
 }
 function resetDay(di){
   markDirty();
-  delete HOURS_OVERRIDE[fmtD(LAST.dates[di])];
+  const d=LAST.dates[di];
+  delete HOURS_OVERRIDE[dayKey(d)];
+  // ล้าง override รายชั่วโมง (เผื่อเคยปิดทั้งวัน) ของร้านนี้วันนี้
+  storeHours(d,CUR_STORE).forEach(h=>{ delete OVERRIDES[skey(CUR_STORE,d,h)]; });
+  closeDay(); runAndRender();
+}
+// ปิดไลฟ์ทั้งวัน = ตั้งทุกชั่วโมงของวันเป็น "พักไลฟ์"
+function closeWholeDay(di){
+  markDirty();
+  const d=LAST.dates[di];
+  storeHours(d,CUR_STORE).forEach(h=>{ OVERRIDES[skey(CUR_STORE,d,h)]='closed'; });
   closeDay(); runAndRender();
 }
 // ---------- เข้างานจริง ----------
@@ -785,7 +797,7 @@ function renderTable(){
   const order=DAY_ORDER; // 07:00 -> 06:00
   let html='<thead><tr><th>เวลา</th>';
   LAST.dates.forEach((d,di)=>{const wd=DAYS[(d.getDay()+6)%7];
-    const camp=isCampaign(d); const ov=(fmtD(d) in HOURS_OVERRIDE);
+    const camp=isCampaign(d); const ov=((CUR_STORE+'|'+fmtD(d)) in HOURS_OVERRIDE);
     const tag=ov?'✏️':(camp?'🎯':'');
     html+='<th style="cursor:pointer" onclick="openDay('+di+')" title="คลิกตั้งเวลาเปิด-ปิดวันนี้">'+wd+' '+tag+
       '<span class="d">'+fmtD(d)+'</span>'+
