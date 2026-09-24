@@ -563,6 +563,7 @@ function openPicker(di,h,ev){
     html+='<button onclick="setCell('+ei+')"'+sel+'><span class="sw" style="background:'+e.color+'"></span>'+e.name+'</button>';
   });
   html+='<button class="clr" onclick="setCell(-1)"><span class="sw" style="background:var(--gap)"></span>ว่าง (ไม่มีคน)</button>';
+  html+='<button onclick="setCell(\'closed\')"'+(cur==='closed'?' style="background:#EEE9F5"':'')+'><span class="sw" style="background:#D8CEE8"></span>🌙 พักไลฟ์ (ปิดชั่วโมงนี้)</button>';
   html+='<button onclick="clearOverride()" style="color:var(--text3);border-top:1px solid var(--line);margin-top:4px;padding-top:9px">↺ คืนค่าอัตโนมัติ</button>';
   const pop=document.getElementById('pop'); pop.innerHTML=html; pop.style.display='block';
   const r=ev.currentTarget.getBoundingClientRect(); const pw=pop.offsetWidth,ph=pop.offsetHeight;
@@ -575,7 +576,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('#pop')&&!e.target.cl
 function setCell(ei){
   markDirty();
   if(!PICK)return; const {di,h}=PICK; const g=LAST.grid[di];
-  OVERRIDES[dateKey(g.date,h)] = (ei===-1)?'gap':ei;
+  OVERRIDES[dateKey(g.date,h)] = (ei===-1)?'gap':ei;   // ei = number | 'closed' | -1(gap)
   closePop(); runAndRender(); showWarn(di,h);
 }
 function clearOverride(){
@@ -739,7 +740,7 @@ function resolveReal(di,h,store){ // ค่าจริงของช่อง 
   const k=skey(store,g.date,h);
   if(k in REAL) return REAL[k];
   const idx=g.hours.indexOf(h); const v=g.row[idx];
-  return (typeof v==='number')?[v]:'gap';
+  return (typeof v==='number')?[v] : (v==='closed'?'closed':'gap');
 }
 function setView(v){
   VIEW=v;
@@ -805,6 +806,7 @@ function renderTable(){
       const selc=(COPY_MODE&&inSel(di,h))?' sel':'';
       const cls='cell editable'+(isManual?' manual':'')+(bad?' badcell':'')+selc;
       if(v==='gap'){ html+='<td><span class="'+cls+' gap" onclick="openPicker('+di+','+h+',event)">ว่าง</span></td>'; return; }
+      if(v==='closed'){ html+='<td><span class="cell editable closed'+(isManual?' manual':'')+selc+'" onclick="openPicker('+di+','+h+',event)">พักไลฟ์</span></td>'; return; }
       const e=EMP[v];
       const marks=(e.role==='support'?' <span class="p">⭐</span>':'')+(isNight?' <span class="p">🌙</span>':'');
       html+='<td><span class="'+cls+'" style="background:'+e.color+'" '+
@@ -822,6 +824,7 @@ function realCell(di,h,isNight){
   const mark=(edited?' manual':'')+selc;
   const clk='onclick="onRealCell('+di+','+h+',event)"';
   if(r==='gap') return '<td class="realedit"><span class="cell editable gap'+mark+'" '+clk+'>ว่าง</span></td>';
+  if(r==='closed') return '<td class="realedit"><span class="cell editable closed'+(edited?' manual':'')+selc+'" '+clk+'>พักไลฟ์</span></td>';
   if(r.length===1){
     const e=EMP[r[0]];
     const marks=(isNight?' <span class="p">🌙</span>':'');
@@ -896,7 +899,7 @@ function renderWage(){
     LAST.dates.forEach((d,di)=>{
       const g=(LAST.all[store]||[])[di]; if(!g)return;
       g.hours.forEach(h=>{
-        const r=resolveReal(di,h,store); if(r==='gap')return;
+        const r=resolveReal(di,h,store); if(r==='gap'||r==='closed')return;
         const share=1/r.length; const night=(h>=0&&h<6);
         r.forEach(ei=>{ if(night)pay[ei].n+=share; else pay[ei].d+=share; });
       });
@@ -1056,7 +1059,7 @@ async function saveWeekToSheet(){
     const wk=weekKeyOf(); const bwk=BONUS[wk]||{};
     const pay=EMP.map(()=>({d:0,n:0}));
     STORES.forEach(store=>{ LAST.dates.forEach((dd,di)=>{const g=(LAST.all[store]||[])[di]; if(!g)return;
-      g.hours.forEach(h=>{const r=resolveReal(di,h,store); if(r==='gap')return;
+      g.hours.forEach(h=>{const r=resolveReal(di,h,store); if(r==='gap'||r==='closed')return;
         const share=1/r.length; const night=(h>=0&&h<6);
         r.forEach(ei=>{ if(night)pay[ei].n+=share; else pay[ei].d+=share; });});});});
     const payRows=[];
