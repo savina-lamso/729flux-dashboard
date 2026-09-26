@@ -781,6 +781,13 @@ function copyWeekToNext(){
   const nextStart=new Date(weekStart); nextStart.setDate(nextStart.getDate()+7);
   src.forEach((g,di)=>{
     const nd=new Date(nextStart); nd.setDate(nd.getDate()+di);
+    const sd=LAST.dates[di];
+    // ก๊อปเวลาเปิด-ปิดของวัน (ถ้าต้นทางตั้งเอง) ไปด้วย เพื่อให้ชั่วโมงเปิดตรงกัน
+    const srcHK=CUR_STORE+'|'+fmtD(sd);
+    if(srcHK in HOURS_OVERRIDE){ HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(nd)]={open:HOURS_OVERRIDE[srcHK].open,close:HOURS_OVERRIDE[srcHK].close}; }
+    else { delete HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(nd)]; }
+    // ก๊อปทุกชั่วโมง (รวมพักไลฟ์) — ล้างของเดิมปลายทางก่อน แล้วใส่ตามต้นทาง
+    DAY_ORDER.forEach(h=>{ delete OVERRIDES[skey(CUR_STORE,nd,h)]; });
     g.hours.forEach((h,idx)=>{ const v=g.row[idx];
       OVERRIDES[skey(CUR_STORE,nd,h)] = (typeof v==='number')?v:(v==='closed'?'closed':'gap');
     });
