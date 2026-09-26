@@ -293,9 +293,9 @@ function prefSpan(e){ if(!e.pref)return 24; const {s,e:en}=e.pref; return s<en?(
 const RATE_DAY=50, RATE_NIGHT=60, MIN_DAY=6, SOFT_MAX=8, HARD_MAX=10, BLOCK_MAX=3, BLOCK_MIN=2;
 
 // ---------- วันที่ / สัปดาห์ ----------
-let weekStart = mondayOf(new Date(2026,8,11)); // 11 ก.ย. 2026
+let weekStart = mondayOf(new Date());   // สัปดาห์ปัจจุบันตามวันนี้
 function mondayOf(d){d=new Date(d);const g=(d.getDay()+6)%7;d.setDate(d.getDate()-g);d.setHours(0,0,0,0);return d;}
-function today(){weekStart=mondayOf(new Date(2026,8,11));runAndRender();}
+function today(){weekStart=mondayOf(new Date());runAndRender();}
 function shiftWeek(n){weekStart=new Date(weekStart);weekStart.setDate(weekStart.getDate()+n*7);runAndRender();}
 function fmtD(d){return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();}
 
@@ -781,12 +781,10 @@ function copyWeekToNext(){
   const nextStart=new Date(weekStart); nextStart.setDate(nextStart.getDate()+7);
   src.forEach((g,di)=>{
     const nd=new Date(nextStart); nd.setDate(nd.getDate()+di);
-    const sd=LAST.dates[di];
-    // ก๊อปเวลาเปิด-ปิดของวัน (ถ้าต้นทางตั้งเอง) ไปด้วย เพื่อให้ชั่วโมงเปิดตรงกัน
-    const srcHK=CUR_STORE+'|'+fmtD(sd);
-    if(srcHK in HOURS_OVERRIDE){ HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(nd)]={open:HOURS_OVERRIDE[srcHK].open,close:HOURS_OVERRIDE[srcHK].close}; }
-    else { delete HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(nd)]; }
-    // ก๊อปทุกชั่วโมง (รวมพักไลฟ์) — ล้างของเดิมปลายทางก่อน แล้วใส่ตามต้นทาง
+    // บังคับให้ชั่วโมงเปิดของวันปลายทาง = ตามต้นทางเป๊ะ (ครอบทั้งแคมเปญ/ตั้งเอง/ปกติ)
+    const srcHours=g.hours; const open=srcHours[0], close=(srcHours[srcHours.length-1]+1)%24;
+    HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(nd)]={open,close};
+    // ก๊อปทุกชั่วโมง (รวมพักไลฟ์) — ล้างของเดิมปลายทางก่อน
     DAY_ORDER.forEach(h=>{ delete OVERRIDES[skey(CUR_STORE,nd,h)]; });
     g.hours.forEach((h,idx)=>{ const v=g.row[idx];
       OVERRIDES[skey(CUR_STORE,nd,h)] = (typeof v==='number')?v:(v==='closed'?'closed':'gap');
