@@ -220,6 +220,13 @@ td.realedit .cell{cursor:pointer}
   </div>
   <div style="font-size:12px;color:var(--text2);margin:-6px 4px 14px">💡 คลิก <b>ช่องในตาราง</b> เพื่อสลับคน · คลิก <b>หัววัน</b> เพื่อตั้งเวลาเปิด-ปิดเฉพาะวัน · คลิก <b>ชื่อพนักงาน</b> เพื่อแก้ข้อมูล/วันลา</div>
 
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <button onclick="copyWeekToNext()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:#fff;border:none;cursor:pointer;background:linear-gradient(135deg,var(--accent),#F0B860);padding:8px 14px;border-radius:10px;box-shadow:0 2px 0 #C47B2E">📋➡️ ก๊อปทั้งสัปดาห์ไปสัปดาห์หน้า</button>
+    <button onclick="closeWholeWeek()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:#6B4FA0;border:none;cursor:pointer;background:#EEE9F5;padding:8px 14px;border-radius:10px">🌙 ปิดไลฟ์ทั้งสัปดาห์</button>
+    <button onclick="openWholeWeek()" style="font-family:Prompt;font-size:12.5px;font-weight:600;color:var(--ok);border:none;cursor:pointer;background:#E6F7F1;padding:8px 14px;border-radius:10px">☀️ เปิดไลฟ์ทั้งสัปดาห์ (คืนค่าปกติ)</button>
+    <span style="font-size:11px;color:var(--text3);align-self:center">* มีผลเฉพาะร้าน <b id="curStoreLbl"></b></span>
+  </div>
+
   <div class="viewtabs">
     <button class="vtab active" id="vtPlan" onclick="setView('plan')">📋 ตารางแผน</button>
     <button class="vtab" id="vtReal" onclick="setView('real')">✅ เข้างานจริง</button>
@@ -766,6 +773,34 @@ function renderStores(){
   const opts=STORES.map(s=>'<option'+(s===CUR_STORE?' selected':'')+'>'+s+'</option>').join('');
   const a=document.getElementById('storePick'); if(a)a.innerHTML=opts;
   const b=document.getElementById('storePick2'); if(b)b.innerHTML=opts;
+  const l=document.getElementById('curStoreLbl'); if(l)l.textContent=CUR_STORE;
+}
+// ---------- ก๊อปทั้งสัปดาห์ไปสัปดาห์หน้า (เฉพาะร้านที่ดูอยู่) ----------
+function copyWeekToNext(){
+  const src=LAST.all[CUR_STORE]||[];
+  const nextStart=new Date(weekStart); nextStart.setDate(nextStart.getDate()+7);
+  src.forEach((g,di)=>{
+    const nd=new Date(nextStart); nd.setDate(nd.getDate()+di);
+    g.hours.forEach((h,idx)=>{ const v=g.row[idx];
+      OVERRIDES[skey(CUR_STORE,nd,h)] = (typeof v==='number')?v:(v==='closed'?'closed':'gap');
+    });
+  });
+  markDirty();
+  setSync('ก๊อปไปสัปดาห์หน้าแล้ว ('+CUR_STORE+') — กด › ไปดู + 💾 บันทึก','#4CAF82');
+}
+// ---------- ปิด/เปิดไลฟ์ทั้งสัปดาห์ (เฉพาะร้านที่ดูอยู่) ----------
+function closeWholeWeek(){
+  LAST.dates.forEach(d=>{ storeHours(d,CUR_STORE).forEach(h=>{ OVERRIDES[skey(CUR_STORE,d,h)]='closed'; }); });
+  markDirty(); runAndRender();
+  setSync('ปิดไลฟ์ทั้งสัปดาห์ ('+CUR_STORE+') — เปิดบางวันได้ที่หัววัน','#E8B14C');
+}
+function openWholeWeek(){
+  LAST.dates.forEach(d=>{
+    delete HOURS_OVERRIDE[CUR_STORE+'|'+fmtD(d)];
+    DAY_ORDER.forEach(h=>{ delete OVERRIDES[skey(CUR_STORE,d,h)]; });
+  });
+  markDirty(); runAndRender();
+  setSync('เปิดไลฟ์ทั้งสัปดาห์ ('+CUR_STORE+') คืนค่าปกติแล้ว','#4CAF82');
 }
 let LAST=null;
 // ---------- เตือนก่อนปิดถ้ายังไม่บันทึก ----------
